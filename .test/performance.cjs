@@ -94,7 +94,9 @@ async function main() {
     const runtime = path.join(root, 'runtime');
     execFileSync(process.execPath, [path.join(project, 'node_modules/typescript/bin/tsc'), '--project', path.join(project, 'tsconfig.json'), '--outDir', runtime, '--sourceMap', 'false'], { cwd: project, stdio: 'pipe' });
     const actual = {};
-    for (const [name, directory] of [['engine-src', path.join(project, 'src')], ['native-sound', path.resolve(project, '../NativeSound')]]) {
+    const actualInputs = process.argv.includes('--large-only') || process.argv.includes('--python-only') ? []
+        : [['engine-src', path.join(project, 'src')], ['native-sound', path.resolve(project, '../NativeSound')]];
+    for (const [name, directory] of actualInputs) {
         actual[name] = { files: Object.fromEntries(sourceFiles(directory).map(file => [file, fs.readFileSync(path.join(directory, file), 'utf8')])), expected: [] };
     }
     const pythonCorpus = mixed(900);

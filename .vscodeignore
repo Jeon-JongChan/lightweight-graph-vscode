@@ -3,9 +3,13 @@
 .build/**
 node_modules/**
 out/**
+dist/common/**
+dist/core/**
+dist/storage/**
 src/**
 tests/**
 .test/**
+.docs/**
 .tools/**
 .gitignore
 .yarnrc

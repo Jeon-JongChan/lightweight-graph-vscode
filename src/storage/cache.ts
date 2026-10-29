@@ -10,8 +10,8 @@ function isRelationRecord(value: unknown): value is Record<string, Relation> {
             (relation.receiver === undefined || typeof relation.receiver === 'string') &&
             (relation.bindingScope === undefined || typeof relation.bindingScope === 'string') &&
             (relation.lexicalBinding === undefined || typeof relation.lexicalBinding === 'string') &&
-            (relation.bindings === undefined || (relation.bindings && typeof relation.bindings === 'object' && !Array.isArray(relation.bindings) &&
-                Object.values(relation.bindings).every(name => typeof name === 'string'))) &&
+            [relation.bindings, relation.reexports].every(names => names === undefined || (names && typeof names === 'object' && !Array.isArray(names) &&
+                Object.values(names).every(name => typeof name === 'string'))) &&
             ['call', 'import', 'inherit', 'implement', 'reference'].includes(relation.kind) &&
             ['EXTRACTED', 'RESOLVED', 'INFERRED', 'UNRESOLVED'].includes(relation.certainty)));
 }
@@ -52,10 +52,12 @@ export class GraphCache {
             }
             const data = JSON.parse(content) as GraphData;
             if (data && data.version === '1.0' && data.symbols && data.relations &&
+                (data.files === undefined || Array.isArray(data.files) && data.files.every(file => typeof file === 'string')) &&
                 typeof data.symbols === 'object' && !Array.isArray(data.symbols) &&
                 isRelationRecord(data.relations) &&
                 (data.extractedRelations === undefined || isRelationRecord(data.extractedRelations)) &&
                 Object.values(data.symbols).every(symbol => symbol && typeof symbol.id === 'string' &&
+                    (symbol.exportNames === undefined || Array.isArray(symbol.exportNames) && symbol.exportNames.every(name => typeof name === 'string')) &&
                     typeof symbol.name === 'string' && typeof symbol.filePath === 'string')) {
                 return data;
             } else {

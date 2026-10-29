@@ -3,7 +3,7 @@
   "publisher": "graph-mcp-dev",
   "displayName": "Lightweight Graph MCP",
   "description": "Lightweight Code Graph MCP for VS Code, Antigravity & Codex",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "engines": {
     "vscode": "^1.102.0"
   },
@@ -67,7 +67,7 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
     "lint": "eslint src/**/*.ts",
-    "test": "jest",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -86,8 +86,11 @@
     "typescript-eslint": "^8.72.0"
   },
   "dependencies": {
+    "@lumis-sh/wasm-pascal": "0.26.2",
+    "@lumis-sh/wasm-systemverilog": "0.26.6",
     "@modelcontextprotocol/sdk": "^1.0.1",
+    "tree-sitter-wasm": "2.0.4",
     "tree-sitter-wasms": "^0.1.13",
-    "web-tree-sitter": "^0.24.7"
+    "web-tree-sitter": "0.25.10"
   }
 }

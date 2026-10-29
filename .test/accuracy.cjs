@@ -13,6 +13,40 @@ require.extensions['.ts'] = function compile(module, filename) {
 
 // §별칭:심볼명§은 선언 시작 행을 수작업 정답으로 지정하며 실제 파일을 쓸 때 제거한다.
 const cases = [
+    { name: 'js-function-expression', files: {
+        'main.js': 'function helper() {} §helper:helper§\nconst entry = function() { helper(); }; §entry:entry§\n'
+    }, required: [['entry', 'helper']] },
+    { name: 'js-generator', files: {
+        'main.js': 'function helper() {} §helper:helper§\nfunction* entry() { helper(); } §entry:entry§\n'
+    }, required: [['entry', 'helper']] },
+    { name: 'ts-default-import', files: {
+        'lib.ts': 'export default function work() {} §work:work§\n',
+        'main.ts': "import alias from './lib';\nfunction entry() { alias(); } §entry:entry§\n"
+    }, required: [['entry', 'work']] },
+    { name: 'ts-reexport-alias', files: {
+        'lib.ts': 'export function work() {} §work:work§\n',
+        'index.ts': "export { work as run } from './lib';\n",
+        'main.ts': "import { run } from './index';\nfunction entry() { run(); } §entry:entry§\n"
+    }, required: [['entry', 'work']] },
+    { name: 'ts-default-expression', files: {
+        'lib.ts': 'function work() {} §work:work§\nexport default work;\n',
+        'main.ts': "import alias from './lib';\nfunction entry() { alias(); } §entry:entry§\n"
+    }, required: [['entry', 'work']] },
+    { name: 'ts-local-export-alias', files: {
+        'lib.ts': 'function work() {} §work:work§\nexport { work as run };\n',
+        'main.ts': "import { run } from './lib';\nfunction entry() { run(); } §entry:entry§\n"
+    }, required: [['entry', 'work']] },
+    { name: 'ts-star-namespace', files: {
+        'lib.ts': 'export function work() {} §work:work§\n',
+        'index.ts': "export * from './lib';\n",
+        'main.ts': "import * as api from './index';\nfunction entry() { api.work(); } §entry:entry§\n"
+    }, required: [['entry', 'work']] },
+    { name: 'ts-star-ambiguity', files: {
+        'a.ts': 'export function work() {} §first:work§\n',
+        'b.ts': 'export function work() {} §second:work§\n',
+        'index.ts': "export * from './a';\nexport * from './b';\n",
+        'main.ts': "import { work } from './index';\nfunction entry() { work(); } §entry:entry§\n"
+    }, required: [], forbidden: [['entry', 'first'], ['entry', 'second']] },
     { name: 'ts-import-alias', files: {
         'lib.ts': 'export function work() {} §work:work§\n',
         'main.ts': "import { work as alias } from './lib';\nfunction entry() { alias(); } §entry:entry§\n"

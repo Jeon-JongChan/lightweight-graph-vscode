@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Language, Relation, SymbolInfo, SymbolKind } from '../../common/types';
+import { Language, Position, Relation, SymbolInfo, SymbolKind } from '../../common/types';
 import { CodeParser } from '../parser';
 import languages from '../../common/languages.json';
 import { NodeDeclaration, declarationName, extractCleanType, lookupReceiverType, nodeRange, visitAst } from '../declarations';
@@ -12,6 +12,7 @@ export interface LanguageAnalysis {
 /** 언어 전략은 AST 규칙을 소유하고 파사드는 이 계약만 사용한다. */
 export interface LanguageAnalyzer {
     readonly family: string;
+    readonly caseInsensitive?: boolean;
     readonly implicitThis: boolean;
     readonly importExtensions: readonly string[];
     /** 언어의 모듈 표기를 실제 파일 후보 경로로 변환한다. */
@@ -94,7 +95,43 @@ export abstract class AstLanguageAnalyzer implements LanguageAnalyzer {
     /** 실패 시에도 WASM 트리를 해제하며 기존 스냅샷은 호출자가 보존한다. */
     protected extract(tree: any, filePath: string): LanguageAnalysis {
         try {
-            return { hasError: Boolean(tree.rootNode.hasError), symbols: this.extractSymbols(tree, filePath), relations: this.extractRelations(tree, filePath) };
+            const symbols = this.extractSymbols(tree, filePath);
+            const relations = this.extractRelations(tree, filePath);
+            const declarations = new Map<string, SymbolInfo[]>();
+            for (const symbol of symbols) {
+                // 선언·정의 병합이 필요한 C/Objective-C와 함수 절을 합치는 Erlang은 유지한다.
+                if (!['java', 'csharp', 'apex'].includes(symbol.language)) continue;
+                if (!['function', 'method'].includes(symbol.kind)) continue;
+                const group = declarations.get(symbol.id) || [];
+                group.push(symbol);
+                declarations.set(symbol.id, group);
+            }
+            const duplicates = [...declarations].filter(([, group]) => group.length > 1).sort(([left], [right]) => right.length - left.length);
+            /** 중복 선언과 그 안쪽 범위에만 위치를 붙여 기존의 고유 ID는 유지한다. */
+            function qualify(id: string, position?: Position): string {
+                if (!position) return id;
+                let qualified = id;
+                for (const [original, group] of duplicates) {
+                    if (id !== original && !id.startsWith(`${original}::`)) continue;
+                    const owner = group.find(symbol => {
+                        const { start, end } = symbol.range;
+                        return (position.line > start.line || position.line === start.line && position.character >= start.character) &&
+                            (position.line < end.line || position.line === end.line && position.character < end.character);
+                    });
+                    if (owner) qualified = `${qualified.slice(0, original.length)}@${owner.range.start.line}:${owner.range.start.character}${qualified.slice(original.length)}`;
+                }
+                return qualified;
+            }
+            for (const symbol of symbols) symbol.id = qualify(symbol.id, symbol.range.start);
+            for (const relation of relations) {
+                const source = qualify(relation.sourceId, relation.range?.start);
+                // 오버로드 본문의 관계도 구별해 같은 대상 호출이 덮어써지지 않게 한다.
+                if (source !== relation.sourceId) relation.id += `@${source}`;
+                relation.sourceId = source;
+                if (relation.lexicalBinding) relation.lexicalBinding = qualify(relation.lexicalBinding, relation.range?.start);
+                if (relation.bindingScope) relation.bindingScope = qualify(relation.bindingScope, relation.range?.start);
+            }
+            return { hasError: Boolean(tree.rootNode.hasError), symbols, relations };
         }
         finally {
             tree.delete();

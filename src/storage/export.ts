@@ -124,6 +124,7 @@ export function buildExportedGraph(data: GraphData, root: string = '') {
 
     // 1. 파일 수준 노드와 심볼 노드를 등록하고 구조적 포함(contains/method) 링크를 생성한다.
     const fileSet = new Set<string>();
+    for (const file of data.files || []) fileSet.add(portableId(file, root));
     for (const symbol of Object.values(data.symbols)) {
         fileSet.add(portableId(symbol.filePath, root));
     }

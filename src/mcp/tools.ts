@@ -78,11 +78,13 @@ export class GraphTools {
         const data = this.getGraphData();
         const results: Relation[] = [];
         const targetSym = this.getSymbolInfo(target);
-        if (!targetSym) return results;
+        const isFile = data.files?.includes(target) || Object.values(data.symbols).some(symbol => symbol.filePath === target);
+        if (!targetSym && !isFile) return results;
 
         for (const id in data.relations) {
             const rel = data.relations[id];
-            if (rel.sourceId === targetSym.id || rel.sourceId === targetSym.filePath) {
+            if (isFile ? rel.sourceId === target || rel.sourceId.startsWith(`${target}::`)
+                : rel.sourceId === targetSym!.id || rel.sourceId === targetSym!.filePath) {
                 results.push(rel);
             }
         }
@@ -101,8 +103,7 @@ export class GraphTools {
             if (rel.kind === 'call' && (
                 rel.targetId === target ||
                 (targetSym && rel.targetId === targetSym.id) ||
-                rel.targetId.endsWith(`::${target}`) ||
-                rel.targetId === `unknown::${targetName}`
+                (!target.includes('::') && (rel.targetId.endsWith(`::${target}`) || rel.targetId === `unknown::${targetName}`))
             )) {
                 results.push(rel);
             }
@@ -131,6 +132,19 @@ export class GraphTools {
         const data = this.getGraphData();
         const impact: SymbolInfo[] = [];
         const visited = new Set<string>();
+        const incoming = new Map<string, Relation[]>();
+        const supertypes = new Map<string, string[]>();
+        for (const relation of Object.values(data.relations)) {
+            if (!['call', 'inherit', 'implement', 'reference'].includes(relation.kind)) continue;
+            const edges = incoming.get(relation.targetId) || [];
+            edges.push(relation);
+            incoming.set(relation.targetId, edges);
+            if (['inherit', 'implement'].includes(relation.kind) && data.symbols[relation.targetId]) {
+                const parents = supertypes.get(relation.sourceId) || [];
+                parents.push(relation.targetId);
+                supertypes.set(relation.sourceId, parents);
+            }
+        }
         const startSym = this.getSymbolInfo(target);
         const queue: Array<{ targetKey: string; depth: number }> = [
             { targetKey: startSym ? startSym.id : target, depth: 0 }
@@ -149,48 +163,45 @@ export class GraphTools {
             }
         }
 
-        // 자식 클래스 메서드가 부모/인터페이스 메서드를 오버라이드한 경우 부모 메서드 호출자도 함께 추적한다.
+        /** 중첩 클래스·Python 메서드와 중간 구현이 없는 상속도 순환 없이 탐색한다. */
         const findOverriddenSuperMethods = (methodSymId: string): string[] => {
             const sym = data.symbols[methodSymId];
-            if (!sym || sym.kind !== 'method') return [];
-            const parts = methodSymId.split('::');
-            if (parts.length < 3) return [];
-            const ownerClassId = `${parts[0]}::${parts[1]}`;
-            const methodName = sym.name;
+            if (!sym || !['function', 'method'].includes(sym.kind)) return [];
+            const ownerClassId = methodSymId.slice(0, methodSymId.lastIndexOf('::'));
+            if (!['class', 'interface'].includes(data.symbols[ownerClassId]?.kind)) return [];
             const results: string[] = [];
-            for (const id in data.relations) {
-                const rel = data.relations[id];
-                if ((rel.kind === 'inherit' || rel.kind === 'implement') && rel.sourceId === ownerClassId && !rel.targetId.startsWith('unknown::')) {
-                    const superMethodId = `${rel.targetId}::${methodName}`;
-                    if (data.symbols[superMethodId]) {
-                        results.push(superMethodId);
-                    }
+            const owners = [ownerClassId];
+            const seen = new Set(owners);
+            for (let head = 0; head < owners.length; head++) {
+                for (const parent of supertypes.get(owners[head]) || []) {
+                    if (seen.has(parent)) continue;
+                    seen.add(parent);
+                    owners.push(parent);
+                    const superMethodId = `${parent}::${sym.name}`;
+                    if (data.symbols[superMethodId]) results.push(superMethodId);
                 }
             }
             return results;
         };
 
-        while (queue.length > 0) {
-            const { targetKey, depth } = queue.shift()!;
+        for (let head = 0; head < queue.length; head++) {
+            const { targetKey, depth } = queue[head];
             if (depth >= maxDepth) continue;
 
+            const targets = [targetKey];
             for (const superMethodId of findOverriddenSuperMethods(targetKey)) {
                 if (!visited.has(superMethodId)) {
                     visited.add(superMethodId);
-                    queue.unshift({ targetKey: superMethodId, depth });
+                    targets.push(superMethodId);
                 }
             }
 
-            const shortName = targetKey.split('::').pop() || targetKey;
-            const isScopedTarget = targetKey.includes('::');
-
-            for (const id in data.relations) {
-                const rel = data.relations[id];
-                if (!['call', 'inherit', 'implement', 'reference'].includes(rel.kind)) continue;
-                const matches = rel.targetId === targetKey ||
-                    rel.targetId.endsWith(`::${targetKey}`) ||
-                    (!isScopedTarget && rel.targetId.endsWith(`::${shortName}`));
-                if (matches && data.symbols[rel.sourceId] && !visited.has(rel.sourceId)) {
+            const edges = targets.flatMap(id => incoming.get(id) || []);
+            // 심볼을 찾지 못한 짧은 이름 요청만 접미사 후보를 허용한다.
+            const candidates = !startSym && !targetKey.includes('::')
+                ? [...incoming.entries()].filter(([id]) => id.endsWith(`::${targetKey}`)).flatMap(([, relations]) => relations).concat(edges) : edges;
+            for (const rel of candidates) {
+                if (data.symbols[rel.sourceId] && !visited.has(rel.sourceId)) {
                     visited.add(rel.sourceId);
                     impact.push(data.symbols[rel.sourceId]);
                     queue.push({ targetKey: rel.sourceId, depth: depth + 1 });
@@ -432,7 +443,7 @@ export class GraphTools {
         const data = this.getGraphData();
         const exported = buildExportedGraph(data, this.getWorkspaceRoot());
         const stats = {
-            totalFiles: new Set(Object.values(data.symbols).map(s => s.filePath)).size,
+            totalFiles: new Set(data.files || Object.values(data.symbols).map(s => s.filePath)).size,
             totalSymbols: Object.keys(data.symbols).length,
             totalRelations: Object.keys(data.relations).length,
             communitiesCount: exported.communities.length,

@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$PortableNode = Join-Path $ProjectRoot '.build\nodejs\node\node.exe'
+$PortableNode = Join-Path $ProjectRoot '.tools\.build\nodejs\node\node.exe'
 $ServerJs = Join-Path $ProjectRoot 'dist\mcp\server.js'
 $LauncherCmd = Join-Path $ProjectRoot 'graph-mcp.cmd'
 $SkillSourceFile = Join-Path $ProjectRoot 'skill\SKILL.md'
@@ -27,7 +27,7 @@ function Resolve-NodeExe {
     if ($sysNode) {
         return $sysNode.Source
     }
-    $nodeScript = Join-Path $ProjectRoot '.build\nodejs.ps1'
+    $nodeScript = Join-Path $ProjectRoot '.tools\.build\nodejs.ps1'
     if (Test-Path -LiteralPath $nodeScript) {
         & $nodeScript -Action install | Out-Host
         if (Test-Path -LiteralPath $PortableNode) {
@@ -177,7 +177,7 @@ switch ($Action) {
         if (-not (Test-Path -LiteralPath $ServerJs)) {
             Push-Location $ProjectRoot
             try {
-                & (Join-Path $ProjectRoot '.build\npm.cmd') run bundle | Out-Host
+                & (Join-Path $ProjectRoot '.tools\.build\npm.cmd') run bundle | Out-Host
             } finally {
                 Pop-Location
             }

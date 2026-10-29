@@ -11,7 +11,7 @@ require.extensions['.ts'] = function compile(module, filename) {
     }).outputText, filename);
 };
 
-/** 기존 검사 밖의 작은 반례를 기록하며 제품 소스와 전역 설정을 변경하지 않는다. */
+/** 동일 입력에서 확인한 누락·오연결이 다시 생기지 않는지 검사한다. */
 async function main() {
     const project = path.resolve(__dirname, '..');
     const root = fs.mkdtempSync(path.join(__dirname, 'audit-20261029-'));
@@ -24,7 +24,10 @@ async function main() {
         { name: 'java-overloads', files: { 'Main.java': 'class Main {\n void work() {}\n void work(int value) {}\n void entry() { work(); work(1); }\n}\n' } },
         { name: 'python-override-impact', files: { 'main.py': 'class Base:\n    def work(self): pass\nclass Child(Base):\n    def work(self): pass\ndef entry(item: Base):\n    item.work()\n' } },
         { name: 'tsconfig-extends', files: { 'tsconfig.json': '{"extends":"./base.json"}', 'base.json': '{"compilerOptions":{"paths":{"@lib/*":["src/*"]}}}', 'main.ts': "import { work } from '@lib/lib';\nexport function entry() { work(); }", 'src/lib.ts': 'export function work() {}' } },
-        { name: 'unresolved-callers', files: { 'a.ts': 'export function work() {}', 'b.ts': 'export function work() {}', 'main.ts': 'export function entry() { work(); }' } }
+        { name: 'unresolved-callers', files: { 'a.ts': 'export function work() {}', 'b.ts': 'export function work() {}', 'main.ts': 'export function entry() { work(); }' } },
+        { name: 'tsconfig-parent-directory', files: { 'tsconfig.json': '{"extends":"./config/base"}', 'config/base.json': '{"compilerOptions":{"baseUrl":"./source","paths":{"@lib/*":["*"]}}}', 'main.ts': "import { work } from '@lib/lib';\nexport function entry() { work(); }", 'config/source/lib.ts': 'export function work() {}' } },
+        { name: 'tsconfig-cycle', files: { 'tsconfig.json': '{"extends":"./base.json"}', 'base.json': '{"extends":"./tsconfig.json"}', 'main.ts': "import { work } from './lib';\nexport function entry() { work(); }", 'lib.ts': 'export function work() {}' } },
+        { name: 'python-nested-override-impact', files: { 'main.py': 'class Outer:\n    class Base:\n        def work(self): pass\n    class Mid(Base): pass\n    class Child(Mid):\n        def work(self): pass\ndef entry(item: Outer.Base):\n    item.work()\n' } }
     ];
     const results = [];
     for (const sample of cases) {
@@ -45,25 +48,30 @@ async function main() {
         if (sample.name === 'file-dependencies') {
             row.expected = '파일 경로로 임포트 의존성 1개 이상';
             row.actual = tools.getDependencies(path.join(directory, 'main.ts'));
-            row.defectReproduced = row.actual.length === 0 && relations.some(r => r.kind === 'import');
-        } else if (sample.name === 'empty-module' || sample.name === 'tsconfig-extends') {
+            row.defectReproduced = !row.actual.some(r => r.kind === 'import') || !row.actual.some(r => r.kind === 'call');
+        } else if (sample.name === 'empty-module' || sample.name.startsWith('tsconfig-')) {
             row.expected = '로컬 임포트가 RESOLVED';
             row.actual = relations.filter(r => r.kind === 'import');
-            row.defectReproduced = row.actual.some(r => r.certainty !== 'RESOLVED');
+            row.defectReproduced = !row.actual.length || row.actual.some(r => r.certainty !== 'RESOLVED');
         } else if (sample.name === 'function-expressions') {
             row.expected = 'entry와 stream 선언 및 각각의 helper 호출';
-            row.defectReproduced = !symbols.some(s => s.name === 'entry' && s.kind === 'function') && !symbols.some(s => s.name === 'stream');
+            row.defectReproduced = !symbols.some(s => s.name === 'entry' && s.kind === 'function') || !symbols.some(s => s.name === 'stream') ||
+                !['entry', 'stream'].every(name => relations.some(r => r.kind === 'call' && r.sourceId.endsWith(`::${name}`) && r.targetId.endsWith('::helper')));
         } else if (sample.name === 'java-overloads') {
             row.expected = 'work 오버로드 선언 2개';
-            row.defectReproduced = symbols.filter(s => s.name === 'work').length === 1;
+            row.defectReproduced = symbols.filter(s => s.name === 'work').length !== 2 || relations.some(r => r.kind === 'call' && data.symbols[r.targetId]?.name === 'work');
         } else if (sample.name === 'python-override-impact') {
             row.expected = 'Child.work의 영향 범위에 Base 타입으로 호출하는 entry 포함';
             row.actual = tools.getImpact(`${path.join(directory, 'main.py')}::Child::work`).map(s => s.name);
-            row.defectReproduced = !row.actual.includes('entry') && relations.some(r => r.targetId.endsWith('::Base::work'));
+            row.defectReproduced = !row.actual.includes('entry');
+        } else if (sample.name === 'python-nested-override-impact') {
+            row.expected = '중간 구현이 없는 중첩 상속도 같은 깊이에서 entry에 도달';
+            row.actual = tools.getImpact(`${path.join(directory, 'main.py')}::Outer::Child::work`, 1).map(s => s.name);
+            row.defectReproduced = !row.actual.includes('entry');
         } else if (sample.name === 'unresolved-callers') {
             row.expected = '정확한 a.ts::work ID의 확정 호출자는 0개';
             row.actual = tools.getCallers(`${path.join(directory, 'a.ts')}::work`);
-            row.defectReproduced = row.actual.some(r => r.targetId === 'unknown::work');
+            row.defectReproduced = row.actual.length !== 0;
         }
         if (process.argv[2]) {
             // 비교 워커가 src만 선택하므로 전체 fixture 파일을 명시해 직접 추출한다.
@@ -77,7 +85,39 @@ async function main() {
         console.log(`${row.name}: 문제 재현 ${row.defectReproduced}`);
     }
     fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify(results, null, 2));
-    assert(results.every(row => row.defectReproduced), '현재 검토한 문제의 재현 상태가 바뀌었다.');
+    assert.deepEqual(results.filter(row => row.defectReproduced).map(row => row.name), [], '누락·오연결 반례가 남았다.');
+
+    const { CodeParser } = require('../src/core/parser.ts');
+    const { analyzeFile } = require('../src/core/analyzers.ts');
+    const parser = new CodeParser();
+    await parser.initialize(project, ['terraform', 'markdown', 'javascript', 'csharp']);
+    try {
+        const terraformFile = path.join(root, 'references.tf');
+        const terraform = analyzeFile('terraform', 'data "aws_ami" "base" {}\nlocals { image = data.aws_ami.base.id }\nresource "aws_instance" "web" { ami = local.image }', terraformFile, parser);
+        const terraformData = { version: '1.0', symbols: Object.fromEntries(terraform.symbols.map(s => [s.id, s])), relations: Object.fromEntries(terraform.relations.map(r => [r.id, r])) };
+        const { RelationResolver } = require('../src/core/resolution.ts');
+        new RelationResolver(terraformData).resolve();
+        assert(Object.values(terraformData.relations).some(r => r.sourceId.endsWith('::local.image') && r.targetId.endsWith('::data.aws_ami.base')), 'Terraform data의 세 부분 이름을 보존해야 한다.');
+        assert(Object.values(terraformData.relations).some(r => r.sourceId.endsWith('::aws_instance.web') && r.targetId.endsWith('::local.image')), 'Terraform locals를 참조할 수 있어야 한다.');
+        const markdown = analyzeFile('markdown', '# 제목\n`[가짜](./fake.ts)`와 [진짜](./real.ts), [원격](git+ssh://host/repo)\n', path.join(root, 'links.md'), parser);
+        assert.equal(markdown.relations.filter(r => r.kind === 'import').length, 1, 'Markdown 코드·원격 URI를 로컬 파일로 오인하면 안 된다.');
+        const dynamic = analyzeFile('javascript', 'const one = require(target); const two = require(`./${name}`);', 'dynamic.js', parser);
+        assert(!dynamic.relations.some(r => r.kind === 'import'), '동적 require는 정적 의존성이 아니다.');
+        const overloaded = analyzeFile('csharp', 'class Main { void Help() {} void Work() { Help(); } void Work(int x) { Help(); } void Run() { Work(); } }', 'overload.cs', parser);
+        const work = overloaded.symbols.filter(s => s.name === 'Work');
+        assert.equal(new Set(work.map(s => s.id)).size, 2, '같은 줄의 오버로드도 보존해야 한다.');
+        assert(work.every(s => overloaded.relations.some(r => r.sourceId === s.id && r.targetId === 'unknown::Help')), '각 오버로드 본문에 호출을 귀속해야 한다.');
+    } finally { parser.dispose(); }
+
+    // JS 문법만 있는 격리 자산으로 성공해야 다른 언어의 필수 로드를 피한 것이다.
+    const assets = path.join(root, 'assets');
+    fs.mkdirSync(path.join(assets, 'dist', 'wasm'), { recursive: true });
+    fs.copyFileSync(path.join(project, 'node_modules/tree-sitter-wasms/out/tree-sitter-javascript.wasm'), path.join(assets, 'dist/wasm/tree-sitter-javascript.wasm'));
+    const isolated = path.join(root, 'isolated');
+    fs.mkdirSync(isolated);
+    fs.writeFileSync(path.join(isolated, 'only.js'), 'function only() {}');
+    const isolatedBuild = await buildProjectIndex(isolated, assets);
+    assert.equal(isolatedBuild.symbolsCount, 1, '미사용 문법 없이 JS만 색인할 수 있어야 한다.');
     console.log(`검토 증거: ${root}`);
 }
 

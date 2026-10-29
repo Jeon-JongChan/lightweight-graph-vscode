@@ -24,6 +24,7 @@ export interface SymbolInfo {
     range: Range;
     language: Language;
     documentation?: string;
+    exportNames?: string[]; // 선언 이름과 다른 기본 내보내기 이름을 보존한다.
 }
 
 export interface Relation {
@@ -35,6 +36,7 @@ export interface Relation {
     confidenceScore?: number; // 관계 해석 신뢰도 점수 (0.0 ~ 1.0)
     receiver?: string; // 멤버 호출 시 수신 객체 식별자 힌트 (예: parser, cache, this)
     bindings?: Record<string, string>; // 임포트의 로컬 이름에서 원래 이름으로 연결한다. *는 모듈 수신자다.
+    reexports?: Record<string, string>; // 내보낸 이름에서 원래 이름으로 연결한다. *는 전체 재수출이다.
     bindingScope?: string; // 함수 내부 Python 임포트가 다른 범위로 새지 않게 한다.
     lexicalBinding?: string; // 매개변수·지역 변수가 같은 이름을 가리는 가장 가까운 범위다.
     range?: Range; // Where the relationship is declared in the source code
@@ -42,6 +44,7 @@ export interface Relation {
 
 export interface GraphData {
     version: string;
+    files?: string[]; // 선언 없는 프로젝트·설정 파일도 실제 색인된 파일로 보존한다.
     symbols: Record<string, SymbolInfo>;
     relations: Record<string, Relation>;
     extractedRelations?: Record<string, Relation>; // 증분 갱신 시 다시 해석할 원시 AST 사실이다.

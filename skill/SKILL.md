@@ -5,7 +5,7 @@ description: Lightweight Graph MCP로 코드 그래프를 생성하고 심볼, �
 
 # Lightweight Graph MCP (`lightweight-graph-mcp`)
 
-Tree-sitter WASM 기반으로 13개 언어(JS, TS, TSX, Python, Java, Go, Rust, C, C++, C#, Obj-C, Obj-C++, CUDA)의 AST에서 심볼과 호출·임포트·상속·구현 관계를 추출하고, `<project>/.tools/.graphify/` 아래에 `graph-cache.json`, `graph.json`, `GRAPH_REPORT.md`, `graph.html`을 생성·조회하는 경량 코드 그래프 도구다.
+54개 언어·파일 형식 전략, 44개 고유 Tree-sitter WASM 문법, 135개 확장자를 지원한다. 기존 JS/TS·Python·Java·Go·Rust·C/C++·C#·Objective-C·CUDA 외에 Ruby·Kotlin·Scala·PHP·Swift·Lua·Zig·PowerShell·Elixir·Julia·Groovy·Dart·Fortran·Bash·R·OCaml·Lisp·Erlang·Solidity·Verilog·Pascal과 컴포넌트·설정·프로젝트·문서 형식을 분석한다. VB.NET·COBOL·DreamMaker·Robot 등은 명시적 선언·의존성의 부분 구조 분석이며, PDF·이미지·동영상의 의미 추론은 제공하지 않는다. `<project>/.tools/.graphify/` 아래에 `graph-cache.json`, `graph.json`, `GRAPH_REPORT.md`, `graph.html`을 생성·조회한다. 정확한 목록은 `get_index_status`의 `supportedLanguages`·`supportedExtensions`로 확인하고 버전 변경 뒤 전체 그래프를 재생성한다.
 
 ## MCP 도구 사용
 

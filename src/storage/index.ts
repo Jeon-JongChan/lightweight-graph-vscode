@@ -23,26 +23,29 @@ export class GraphIndex {
     private extensionPath?: string;
     private parseErrorFiles = new Set<string>();
     private workspaceRoot: string;
+    private indexedContents = new Map<string, string>();
 
     /** 프로젝트 캐시와 파서의 자산 경로를 설정한다. */
     constructor(workspaceRoot: string, extensionPath?: string) {
         this.workspaceRoot = workspaceRoot;
         this.cache = new GraphCache(workspaceRoot);
-        this.data = { version: '1.0', symbols: {}, relations: {}, extractedRelations: {} };
+        this.data = { version: '1.0', files: [], symbols: {}, relations: {}, extractedRelations: {} };
         this.extensionPath = extensionPath;
     }
 
     /** 파서를 준비하고 필요할 때 기존 스냅샷을 읽는다. */
     public async initialize(loadCache = true): Promise<void> {
-        await this.parser.initialize(this.extensionPath);
+        await this.parser.initialize(this.extensionPath, []);
         const loaded = loadCache ? await this.cache.load() : null;
         if (loaded) {
             this.data = loaded;
+            this.data.files ||= [...new Set([...Object.values(loaded.symbols).map(symbol => symbol.filePath),
+                ...Object.values(loaded.relations).map(relation => relation.sourceId.split('::')[0])])];
             if (!loaded.extractedRelations) {
                 // 이전 캐시의 해석 결과를 원시 사실로 오인하지 않고 프로젝트 내부 소스에서 복원한다.
                 const files = new Set([...Object.values(loaded.symbols).map(symbol => symbol.filePath),
                     ...Object.values(loaded.relations).map(relation => relation.sourceId.split('::')[0])]);
-                this.data = { version: '1.0', symbols: {}, relations: {}, extractedRelations: {} };
+                this.data = { version: '1.0', files: [], symbols: {}, relations: {}, extractedRelations: {} };
                 const realRoot = fs.realpathSync(this.workspaceRoot);
                 for (const file of files) {
                     const relative = path.relative(realRoot, path.resolve(file));
@@ -62,10 +65,20 @@ export class GraphIndex {
         if (!language) return;
 
         try {
-            const content = await fs.promises.readFile(filePath, 'utf-8');
+            // DMI는 PNG의 텍스트 메타데이터만 읽으며 바이너리 바이트를 손실 없이 전달한다.
+            const content = await fs.promises.readFile(filePath, language === 'dmi' ? 'latin1' : 'utf-8');
+            // 현재 인스턴스에서 확인한 파일만 생략한다. 디스크 캐시의 신선도는 추정하지 않는다.
+            if (this.indexedContents.get(filePath) === content) {
+                if (!skipSave) {
+                    this.resolveRelations();
+                    await this.cache.save(this.data);
+                }
+                return;
+            }
             const cached = rawAstCache.get(filePath);
             if (cached && cached.content === content) {
                 this.removeFileEntries(filePath);
+                this.data.files!.push(filePath);
                 if (cached.hasError) this.parseErrorFiles.add(filePath);
                 for (const sym of cached.symbols) {
                     this.data.symbols[sym.id] = { ...sym };
@@ -74,6 +87,7 @@ export class GraphIndex {
                     this.data.relations[rel.id] = { ...rel };
                     this.data.extractedRelations![rel.id] = { ...rel };
                 }
+                this.indexedContents.set(filePath, content);
                 if (!skipSave) {
                     this.resolveRelations();
                     await this.cache.save(this.data);
@@ -81,6 +95,7 @@ export class GraphIndex {
                 return;
             }
 
+            await this.parser.initialize(this.extensionPath, [language]);
             const { symbols, relations, hasError } = analyzeFile(language, content, filePath, this.parser);
             if (rawAstCache.size > 2000) rawAstCache.clear();
             rawAstCache.set(filePath, {
@@ -90,6 +105,7 @@ export class GraphIndex {
                 relations: relations.map(r => ({ ...r }))
             });
             this.removeFileEntries(filePath);
+            this.data.files!.push(filePath);
             if (hasError) this.parseErrorFiles.add(filePath);
 
             // 키가 같은 중복 선언은 하나로 합친다.
@@ -100,6 +116,7 @@ export class GraphIndex {
                 this.data.relations[rel.id] = { ...rel };
                 this.data.extractedRelations![rel.id] = { ...rel };
             }
+            this.indexedContents.set(filePath, content);
 
             if (!skipSave) {
                 this.resolveRelations();
@@ -124,6 +141,10 @@ export class GraphIndex {
 
     /** 메모리에서 특정 파일에 속한 항목을 제거한다. */
     private removeFileEntries(filePath: string) {
+        this.indexedContents.delete(filePath);
+        // 새 스냅샷에 처음 추가되는 파일은 기존 전체 그래프를 순회할 필요가 없다.
+        if (!this.data.files?.includes(filePath)) return;
+        this.data.files = this.data.files?.filter(file => file !== filePath) || [];
         this.parseErrorFiles.delete(filePath);
         for (const id in this.data.symbols) {
             if (this.data.symbols[id].filePath === filePath) {
@@ -170,8 +191,9 @@ export class GraphIndex {
 
     /** 캐시를 빈 그래프로 초기화한다. */
     public async clear(): Promise<void> {
-        this.data = { version: '1.0', symbols: {}, relations: {}, extractedRelations: {} };
+        this.data = { version: '1.0', files: [], symbols: {}, relations: {}, extractedRelations: {} };
         this.parseErrorFiles.clear();
+        this.indexedContents.clear();
         await this.cache.clear();
     }
 

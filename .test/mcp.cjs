@@ -9,6 +9,17 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
 async function main() {
     const root = fs.mkdtempSync(path.join(__dirname, 'mcp-run-'));
     const secondRoot = fs.mkdtempSync(path.join(__dirname, 'mcp-run-second-'));
+    const languageRoot = fs.mkdtempSync(path.join(__dirname,'mcp-languages-'));
+    const aliasRoot = fs.mkdtempSync(path.join(__dirname, 'mcp-reexports-'));
+    fs.writeFileSync(path.join(aliasRoot, 'lib.ts'), 'export default function work() {}');
+    fs.writeFileSync(path.join(aliasRoot, 'index.ts'), "export { default as run } from './lib';");
+    fs.writeFileSync(path.join(aliasRoot, 'main.ts'), "import { run } from './index'; export function entry() { run(); }");
+    const languageSamples = require('./language-support.json');
+    for(const sample of languageSamples) {
+        const directory=path.join(languageRoot,sample.language);
+        fs.mkdirSync(directory,{recursive:true});
+        fs.writeFileSync(path.join(directory,sample.file),sample.code);
+    }
     fs.writeFileSync(path.join(root, 'Main.java'), 'class Service { int helper() { return 1; } int run() { return helper(); } }');
     fs.writeFileSync(path.join(secondRoot, 'app.py'), 'def util():\n    return 42\ndef entry():\n    return util()\n');
     const serverPath = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(__dirname, '../dist/mcp/server.js');
@@ -30,6 +41,11 @@ async function main() {
         assert(fs.existsSync(result.htmlPath));
         const found = await client.callTool({ name: 'search_symbols', arguments: { query: 'Service' } });
         assert.equal(JSON.parse(found.content[0].text)[0].language, 'java');
+        const aliasesBuilt = await client.callTool({ name: 'build_index', arguments: { project_path: aliasRoot } });
+        assert(!aliasesBuilt.isError, JSON.stringify(aliasesBuilt));
+        const aliasCallees = await client.callTool({ name: 'get_callees', arguments: { target: 'entry', project_path: aliasRoot } });
+        assert(JSON.parse(aliasCallees.content[0].text).some(rel => rel.targetId === `${path.join(aliasRoot, 'lib.ts')}::work`),
+            '배포 번들과 저장 캐시에서도 기본 내보내기·재수출을 실제 선언에 연결해야 한다.');
         const callees = await client.callTool({ name: 'get_callees', arguments: { target: 'run' } });
         assert(JSON.parse(callees.content[0].text).some(rel => rel.targetId.endsWith('::Service::helper') && rel.certainty === 'RESOLVED'),
             'Java의 수신자 없는 동일 클래스 메서드 호출을 실제 대상으로 해석해야 한다.');
@@ -50,6 +66,7 @@ async function main() {
         const details = JSON.parse(status.content[0].text);
         assert.equal(details.status, 'Ready');
         for (const language of ['java', 'go', 'rust', 'c', 'cpp', 'csharp']) assert(details.supportedLanguages.includes(language));
+        for (const extension of require('./graphify-language-reference.json').extensions) assert(details.supportedExtensions.includes(extension.toLowerCase()), extension);
         const lock = path.join(path.dirname(result.cachePath), 'index.lock');
         fs.writeFileSync(lock, '검증이 소유한 잠금', { flag: 'wx' });
         try {
@@ -59,7 +76,16 @@ async function main() {
         // CLI 직접 실행 모드도 검증한다.
         const cliStatus = JSON.parse(execFileSync(process.execPath, [serverPath, 'status', secondRoot], { encoding: 'utf8' }));
         assert.equal(cliStatus.status, 'Ready');
+        const languagesBuilt=await client.callTool({name:'build_index',arguments:{project_path:languageRoot}});
+        assert(!languagesBuilt.isError,JSON.stringify(languagesBuilt));
+        const languagesResult=JSON.parse(languagesBuilt.content[0].text);
+        assert.equal(languagesResult.filesIndexed,languageSamples.length);
+        const languageCache=JSON.parse(fs.readFileSync(languagesResult.cachePath,'utf8'));
+        for(const sample of languageSamples) for(const name of sample.symbols) {
+            assert(languageCache.symbols[path.join(languageRoot,sample.language,sample.file)+'::'+name],sample.file+': '+name);
+        }
         console.log('통과: 배포 번들 stdio 연결, 도구 13개, 다중 프로젝트(project_path), CLI 모드, 상태 갱신, 동시 생성 오류');
+        console.log(`통과: 실제 MCP 프로세스의 신규 형식 ${languageSamples.length}개 생성·캐시 심볼·확장자 공개`);
     } finally { await client.close(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

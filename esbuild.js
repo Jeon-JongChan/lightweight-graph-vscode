@@ -12,6 +12,7 @@ const watch = process.argv.includes('--watch');
 const esbuildProblemMatcherPlugin = {
     name: 'esbuild-problem-matcher',
 
+    /** 위치 정보가 없는 빌드 오류도 원래 메시지를 보존해 출력한다. */
     setup(build) {
         build.onStart(() => {
             console.log('[watch] build started');
@@ -19,7 +20,7 @@ const esbuildProblemMatcherPlugin = {
         build.onEnd((result) => {
             result.errors.forEach(({ text, location }) => {
                 console.error(`✘ [ERROR] ${text}`);
-                console.error(`    ${location.file}:${location.line}:${location.column}:`);
+                if (location) console.error(`    ${location.file}:${location.line}:${location.column}:`);
             });
             console.log('[watch] build finished');
         });
@@ -35,9 +36,9 @@ const esbuildProblemMatcherPlugin = {
 const wasmAssets = [
     ['node_modules/web-tree-sitter/tree-sitter.wasm', 'dist/extension/tree-sitter.wasm'],
     ['node_modules/web-tree-sitter/tree-sitter.wasm', 'dist/mcp/tree-sitter.wasm'],
-    ...[...new Set(Object.values(languages).map(language => language.grammar))].map(grammar => [
-        `node_modules/tree-sitter-wasms/out/tree-sitter-${grammar}.wasm`,
-        `dist/wasm/tree-sitter-${grammar}.wasm`
+    ...Object.values(languages).filter(language => language.grammar).filter((language, index, all) => all.findIndex(other => other.grammar === language.grammar) === index).map(language => [
+        `node_modules/${language.wasm || `tree-sitter-wasms/out/tree-sitter-${language.grammar}.wasm`}`,
+        `dist/wasm/tree-sitter-${language.grammar}.wasm`
     ]),
 ];
 

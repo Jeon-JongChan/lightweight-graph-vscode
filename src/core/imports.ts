@@ -18,20 +18,35 @@ export class ImportResolver {
     /** 프로젝트와 현재 심볼·관계 스냅샷을 연결한다. */
     constructor(private data: GraphData, private workspaceRoot: string) {}
 
-    /** tsconfig.json / jsconfig.json의 baseUrl 및 paths 별칭 매핑을 읽는다. */
+    /** 상대 extends의 순환을 막고 선언된 설정 디렉터리를 기준으로 별칭을 읽는다. */
     private loadTsConfigAliases(): { baseUrl: string | null; paths: Record<string, string[]> } {
+        /** 자식 옵션이 부모 옵션을 대체하되 상대 경로의 원래 기준은 보존한다. */
+        function readConfig(configPath: string, seen = new Set<string>()): { baseUrl: string | null; paths: Record<string, string[]>; pathsBase: string } {
+            if (seen.has(configPath)) throw new Error('설정 상속이 순환합니다.');
+            seen.add(configPath);
+            const parsed = JSON.parse(stripJsonc(fs.readFileSync(configPath, 'utf-8')));
+            const directory = path.dirname(configPath);
+            // shortcut: 패키지 이름 extends는 해석하지 않는다. 패키지 설정 지원 시 Node 모듈 탐색을 추가한다.
+            const inherited = typeof parsed.extends === 'string' && parsed.extends.startsWith('.')
+                ? readConfig(path.resolve(directory, fs.existsSync(path.resolve(directory, parsed.extends)) ? parsed.extends : `${parsed.extends}.json`), seen)
+                : { baseUrl: null, paths: {}, pathsBase: directory };
+            const co = parsed?.compilerOptions || {};
+            return {
+                baseUrl: typeof co.baseUrl === 'string' ? path.resolve(directory, co.baseUrl) : inherited.baseUrl,
+                paths: co.paths && typeof co.paths === 'object' ? co.paths : inherited.paths,
+                pathsBase: co.paths && typeof co.paths === 'object' ? directory : inherited.pathsBase
+            };
+        }
         for (const name of ['tsconfig.json', 'jsconfig.json']) {
             const configPath = path.join(this.workspaceRoot, name);
             if (!fs.existsSync(configPath)) continue;
             try {
-                const raw = fs.readFileSync(configPath, 'utf-8');
-                const parsed = JSON.parse(stripJsonc(raw));
-                const co = parsed?.compilerOptions || {};
-                const baseUrl = typeof co.baseUrl === 'string' ? path.resolve(this.workspaceRoot, co.baseUrl) : null;
+                const config = readConfig(configPath);
+                const baseUrl = config.baseUrl;
                 const pathsMap: Record<string, string[]> = {};
-                if (co.paths && typeof co.paths === 'object') {
-                    const baseDir = baseUrl || this.workspaceRoot;
-                    for (const [alias, targets] of Object.entries(co.paths)) {
+                if (config.paths) {
+                    const baseDir = baseUrl || config.pathsBase;
+                    for (const [alias, targets] of Object.entries(config.paths)) {
                         if (Array.isArray(targets)) {
                             pathsMap[alias] = targets
                                 .filter((t): t is string => typeof t === 'string' && t.length > 0)
@@ -49,7 +64,7 @@ export class ImportResolver {
 
     /** 상대 임포트·tsconfig 별칭·TS ESM(.js->.ts) 및 모듈 경로를 이미 색인된 파일에 연결한다. */
     public resolve() {
-        const knownFiles = new Set<string>();
+        const knownFiles = new Set<string>(this.data.files || []);
         for (const symId in this.data.symbols) {
             knownFiles.add(this.data.symbols[symId].filePath);
         }
@@ -74,7 +89,7 @@ export class ImportResolver {
             const candidateExts = analyzer?.importExtensions || exts;
 
             // tsconfig.json compilerOptions.paths 및 baseUrl 확장
-            for (const [aliasPattern, targetDirs] of Object.entries(tsConfig.paths)) {
+            for (const [aliasPattern, targetDirs] of analyzer?.family === 'script' ? Object.entries(tsConfig.paths) : []) {
                 if (aliasPattern.endsWith('/*')) {
                     const prefix = aliasPattern.slice(0, -1);
                     if (rel.targetId.startsWith(prefix)) {
@@ -87,7 +102,7 @@ export class ImportResolver {
                     candidates.push(...targetDirs);
                 }
             }
-            if (tsConfig.baseUrl && !path.isAbsolute(rel.targetId)) {
+            if (analyzer?.family === 'script' && tsConfig.baseUrl && !path.isAbsolute(rel.targetId)) {
                 candidates.push(path.join(tsConfig.baseUrl, rel.targetId));
             }
 

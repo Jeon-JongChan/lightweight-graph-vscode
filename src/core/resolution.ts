@@ -22,6 +22,7 @@ interface ResolutionContext {
     binding: { filePath: string; name: string } | null;
     bindingCandidates: SymbolInfo[];
     implicitThis: boolean;
+    language: Language | null;
     ancestors: (classId: string) => string[];
 }
 
@@ -34,6 +35,18 @@ interface ResolutionRule {
 /** JS·TS·TSX의 교차 임포트를 같은 문법 계열로 취급한다. */
 function languageFamily(language: Language | null): string {
     return language ? getLanguageAnalyzer(language).family : '';
+}
+
+/** 언어가 허용하는 대소문자·Robot 키워드 규칙만 이름 색인에 적용한다. */
+function canonicalName(language: Language | null, name: string): string {
+    if (!language || !getLanguageAnalyzer(language).caseInsensitive) return name;
+    return language === 'robot' ? name.toLowerCase().replace(/[\s_]/g,'') : name.toLowerCase();
+}
+
+/** 파일 경로는 보존하고 해당 언어의 심볼 이름만 비교한다. */
+function scopedTarget(context: ResolutionContext, id: string): SymbolInfo | undefined {
+    return context.data.symbols[id] || (context.language && getLanguageAnalyzer(context.language).caseInsensitive
+        ? context.matches.find(symbol => symbol.filePath === id.split('::')[0] && canonicalName(context.language,symbol.id.slice(symbol.filePath.length)) === canonicalName(context.language,id.slice(symbol.filePath.length))) : undefined);
 }
 
 /** 전역·임포트로 접근 가능한 최상위 심볼인지 확인한다. */
@@ -50,7 +63,7 @@ function resolveThis(context: ResolutionContext): ResolutionMatch | null {
         owner = owner.slice(0, owner.lastIndexOf('::'));
         if (!['class', 'interface'].includes(data.symbols[owner]?.kind)) continue;
         for (const classId of [owner, ...ancestors(owner)]) {
-            const target = data.symbols[`${classId}::${relation.targetId.slice('unknown::'.length)}`];
+            const target = scopedTarget(context,`${classId}::${relation.targetId.slice('unknown::'.length)}`);
             if (target) return { target, certainty: 'RESOLVED', score: 0.95 };
         }
         return null;
@@ -65,14 +78,14 @@ function resolveLexical(context: ResolutionContext): ResolutionMatch | null {
     const name = relation.targetId.slice('unknown::'.length);
     let scope = relation.sourceId;
     while (true) {
-        const target = data.symbols[`${scope}::${name}`];
+        const target = scopedTarget(context,`${scope}::${name}`);
         if (target && !(relation.kind === 'call' && !context.implicitThis && ['class', 'interface'].includes(data.symbols[scope]?.kind)) &&
             context.matches.includes(target)) {
             return { target, certainty: 'RESOLVED', score: 1 };
         }
         if (relation.kind === 'call' && context.implicitThis && ['class', 'interface'].includes(data.symbols[scope]?.kind)) {
             for (const base of context.ancestors(scope)) {
-                const inherited = data.symbols[`${base}::${name}`];
+                const inherited = scopedTarget(context,`${base}::${name}`);
                 if (inherited && context.matches.includes(inherited)) return { target: inherited, certainty: 'RESOLVED', score: 0.95 };
             }
         }
@@ -85,7 +98,7 @@ function resolveLexical(context: ResolutionContext): ResolutionMatch | null {
 
 /** 수신자 타입에 해당하는 클래스와 부모 클래스의 멤버를 찾는다. */
 function resolveReceiver(context: ResolutionContext): ResolutionMatch | null {
-    const { relation, matches, sourceFile, data, ancestors, importedFiles } = context;
+    const { relation, matches, sourceFile, ancestors, importedFiles } = context;
     if (!relation.receiver || ['this', 'member'].includes(relation.receiver)) return null;
     const name = relation.targetId.slice('unknown::'.length);
     let owners = context.receiverTypes.filter(symbol => ['class', 'interface'].includes(symbol.kind));
@@ -95,7 +108,7 @@ function resolveReceiver(context: ResolutionContext): ResolutionMatch | null {
     const owner = disambiguateCandidates(owners, sourceFile);
     if (!owner) return null;
     for (const ownerId of [owner.id, ...ancestors(owner.id)]) {
-        const target = data.symbols[`${ownerId}::${name}`];
+        const target = scopedTarget(context,`${ownerId}::${name}`);
         if (target && matches.includes(target)) return { target, certainty: 'RESOLVED', score: 0.95 };
     }
     return null;
@@ -135,17 +148,30 @@ export class RelationResolver {
     private importedByFile = new Map<string, Set<string>>();
     private bindingsByScope = new Map<string, Map<string, { filePath: string; name: string }>>();
     private supertypes = new Map<string, Set<string>>();
+    private exportsByFile = new Map<string, Map<string, string[]>>();
+    private reexportsByFile = new Map<string, Relation[]>();
 
     /** Graphify의 label index와 같은 역할의 언어 계열·이름 색인을 만든다. */
     constructor(private data: GraphData) {
         for (const symbol of Object.values(data.symbols)) {
-            const key = `${languageFamily(symbol.language)}::${symbol.name}`;
+            const key = `${languageFamily(symbol.language)}::${canonicalName(symbol.language,symbol.name)}`;
             const candidates = this.byName.get(key) || [];
             candidates.push(symbol);
             this.byName.set(key, candidates);
+            if (symbol.exportNames?.length && isTopLevel(symbol)) {
+                const exports = this.exportsByFile.get(symbol.filePath) || new Map<string, string[]>();
+                for (const name of symbol.exportNames) exports.set(name, [...(exports.get(name) || []), symbol.name]);
+                this.exportsByFile.set(symbol.filePath, exports);
+            }
         }
         for (const relation of Object.values(data.relations)) {
             if (relation.kind === 'import') {
+                if (relation.reexports) {
+                    const forwarded = this.reexportsByFile.get(relation.sourceId) || [];
+                    forwarded.push(relation);
+                    this.reexportsByFile.set(relation.sourceId, forwarded);
+                    continue;
+                }
                 const targets = this.importedByFile.get(relation.sourceId) || new Set<string>();
                 targets.add(relation.targetId);
                 this.importedByFile.set(relation.sourceId, targets);
@@ -159,11 +185,32 @@ export class RelationResolver {
         }
     }
 
+    /** 재수출의 순환·모호성을 차단하고 기본 내보내기의 실제 선언 이름을 찾는다. */
+    private findExport(filePath: string, name: string, seen = new Set<string>()): { filePath: string; name: string } | null {
+        if (name === '*') return { filePath, name };
+        const key = `${filePath}::${name}`;
+        if (seen.has(key)) return null;
+        seen.add(key);
+        const aliases = this.exportsByFile.get(filePath)?.get(name);
+        if (aliases?.length === 1) return { filePath, name: aliases[0] };
+        const language = CodeParser.getLanguageFromFile(filePath);
+        const local = this.byName.get(`${languageFamily(language)}::${canonicalName(language, name)}`) || [];
+        if (local.some(symbol => symbol.filePath === filePath && isTopLevel(symbol))) return { filePath, name };
+        const forwarded = this.reexportsByFile.get(filePath) || [];
+        const named = forwarded.filter(relation => Object.hasOwn(relation.reexports!, name));
+        // export *는 default를 전달하지 않으며 명시적 이름이 별표보다 우선한다.
+        const candidates = named.length ? named : name === 'default' ? [] : forwarded.filter(relation => relation.reexports?.['*'] === '*');
+        const targets = candidates.map(relation => this.findExport(relation.targetId, named.length ? relation.reexports![name] : name, new Set(seen)))
+            .filter((target): target is { filePath: string; name: string } => target !== null);
+        const unique = new Map(targets.map(target => [`${target.filePath}::${target.name}`, target]));
+        return unique.size === 1 ? unique.values().next().value! : null;
+    }
+
     /** 함수 내부 임포트는 해당 함수와 자식 범위에서만 사용한다. */
     private findBinding(scope: string, name: string): { filePath: string; name: string } | null {
         while (true) {
             const binding = this.bindingsByScope.get(scope)?.get(name);
-            if (binding) return binding;
+            if (binding) return this.findExport(binding.filePath, binding.name) || binding;
             if (!scope.includes('::')) return null;
             scope = scope.slice(0, scope.lastIndexOf('::'));
         }
@@ -200,19 +247,20 @@ export class RelationResolver {
             const sourceFile = relation.sourceId.split('::')[0];
             const sourceLanguage = CodeParser.getLanguageFromFile(sourceFile);
             const family = languageFamily(sourceLanguage);
-            const key = `${family}::${relation.targetId.slice('unknown::'.length)}`;
+            const key = `${family}::${canonicalName(sourceLanguage,relation.targetId.slice('unknown::'.length))}`;
             const matches = (this.byName.get(key) || []).filter(symbol => relation.kind !== 'call' ||
                 ['class', 'function', 'method'].includes(symbol.kind));
             const namespace = relation.receiver?.startsWith('namespace::') ? relation.receiver.slice('namespace::'.length) : null;
-            const binding = !relation.lexicalBinding && (namespace || !relation.receiver)
+            let binding = !relation.lexicalBinding && (namespace || !relation.receiver)
                 ? this.findBinding(relation.sourceId, namespace || relation.targetId.slice('unknown::'.length)) : null;
-            const bindingCandidates = binding ? (this.byName.get(`${family}::${binding.name === '*' ? relation.targetId.slice('unknown::'.length) : binding.name}`) || [])
+            if (namespace && binding?.name === '*') binding = this.findExport(binding.filePath, relation.targetId.slice('unknown::'.length)) || binding;
+            const bindingCandidates = binding ? (this.byName.get(`${family}::${canonicalName(sourceLanguage,binding.name === '*' ? relation.targetId.slice('unknown::'.length) : binding.name)}`) || [])
                 .filter(symbol => symbol.filePath === binding.filePath && (relation.kind !== 'call' || ['class', 'function', 'method'].includes(symbol.kind))) : [];
             const typeBinding = relation.receiver && !namespace ? this.findBinding(relation.sourceId, relation.receiver) : null;
-            const receiverTypes = relation.receiver ? (this.byName.get(`${family}::${typeBinding?.name || relation.receiver}`) || [])
+            const receiverTypes = relation.receiver ? (this.byName.get(`${family}::${canonicalName(sourceLanguage,typeBinding?.name || relation.receiver)}`) || [])
                 .filter(symbol => !typeBinding || symbol.filePath === typeBinding.filePath) : [];
             const context: ResolutionContext = {
-                relation, data: this.data, matches, sourceFile, binding, bindingCandidates,
+                relation, data: this.data, matches, sourceFile, binding, bindingCandidates, language:sourceLanguage,
                 importedFiles: this.importedByFile.get(sourceFile) || new Set<string>(), ancestors: this.ancestors,
                 receiverTypes,
                 // Java·C#·C++ 계열의 멤버 본문은 수신자 없이 같은 클래스의 메서드를 호출할 수 있다.

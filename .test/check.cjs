@@ -41,7 +41,7 @@ async function main() {
         if (sample.inherit) assert(relations.some(relation => relation.kind === 'inherit'), `${sample.file}: 상속 누락`);
         assert(relations.filter(relation => relation.kind === 'call').some(relation => data.symbols[relation.sourceId]), `${sample.file}: 호출자 심볼 연결 누락`);
     }
-    assert.equal(built.filesIndexed, samples.length);
+    assert.equal(built.filesIndexed, samples.length + 1, '새로 지원하는 tsconfig.json도 색인해야 한다.');
     assert(Object.values(data.relations).some(rel => rel.sourceId.endsWith('Sample.java::Service::run') && rel.targetId.endsWith('Sample.java::Base::inherited') && rel.certainty === 'RESOLVED'),
         'Java의 암묵적 this 호출은 상속받은 메서드도 해석해야 한다.');
     assert(built.parseErrorFiles.some(file => file.endsWith('sample.cu')));

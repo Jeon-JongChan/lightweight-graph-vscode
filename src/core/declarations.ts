@@ -4,6 +4,7 @@ import { Range, SymbolKind } from '../common/types';
 export interface NodeDeclaration {
     name: string;
     kind: SymbolKind;
+    exportNames?: string[];
 }
 /** 선언·호출자 추출에 동일한 화살표 함수 이름을 제공한다. */
 export function arrowFunctionName(node: any): string {

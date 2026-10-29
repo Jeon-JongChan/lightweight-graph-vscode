@@ -3,11 +3,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import languages from '../common/languages.json';
 
-// Using commonjs require to bypass TS module resolution issues with web-tree-sitter.
-// web-tree-sitter exposes the Parser class as a named export; normalize so this
-// works both from node_modules and from the esbuild bundle.
+// 개발 모듈과 번들이 노출하는 Parser 내보내기 형식을 함께 지원한다.
 const webTreeSitter = require('web-tree-sitter');
 const Parser = webTreeSitter.Parser ?? webTreeSitter.default ?? webTreeSitter;
+
+// 문법을 반복 로드하면 WASM 함수 테이블이 고갈된다. 불변 문법은 프로세스에서 공유한다.
+const grammarCache = new Map<string, Promise<any>>();
+const languageByExtension = new Map<string, Language>(Object.entries(languages).flatMap(([language, config]) =>
+    config.extensions.map(extension => [extension, language as Language] as const)));
 
 /** 번들에 포함된 Tree-sitter WASM으로 코드를 파싱한다. */
 export class CodeParser {
@@ -15,31 +18,50 @@ export class CodeParser {
     private initialized = false;
     private langCache = new Map<Language, any>();
 
-    /** 실행 환경의 문법 WASM을 로드한다. */
-    public async initialize(extensionPath?: string): Promise<void> {
-        if (this.initialized) return;
-
-        await Parser.init();
-        // Language is attached to Parser only after init() completes, so it
-        // must be resolved here rather than at module load time.
+    /** 요청된 문법과 보조 문법만 준비하며 생략하면 기존 전체 초기화를 유지한다. */
+    public async initialize(extensionPath?: string, requestedLanguages: readonly Language[] = Object.keys(languages) as Language[]): Promise<void> {
+        if (this.initialized && requestedLanguages.every(language => this.langCache.has(language) || !languages[language].grammar)) return;
+        if (extensionPath && !fs.existsSync(extensionPath)) throw new Error(`파서 자산 경로가 없습니다: ${extensionPath}`);
+        if (!this.initialized) {
+            await Parser.init();
+            this.parser = new Parser();
+            this.initialized = true;
+        }
+        // Language는 런타임 초기화가 끝난 뒤에 접근해야 한다.
         const Language = Parser.Language ?? webTreeSitter.Language;
-        this.parser = new Parser();
 
         if (!extensionPath) {
-            // Test environment fallback
+            // 직접 파서를 호출하는 검사의 기본 자산 경로다.
             extensionPath = path.resolve(__dirname, '../../');
         }
 
-        // Packaged layout: grammar WASM files are bundled into dist/wasm.
-        // Dev layout: they live in node_modules/tree-sitter-wasms/out.
+        // 배포 자산을 우선하고 개발 환경에서는 설치된 문법을 사용한다.
         const packagedWasmDir = path.join(extensionPath, 'dist', 'wasm');
-        const devWasmDir = path.join(extensionPath, 'node_modules', 'tree-sitter-wasms', 'out');
-        const wasmDir = fs.existsSync(path.join(packagedWasmDir, 'tree-sitter-javascript.wasm')) ? packagedWasmDir : devWasmDir;
+        const packaged = fs.existsSync(path.join(packagedWasmDir, 'tree-sitter-javascript.wasm'));
 
         try {
-            for (const [language, config] of Object.entries(languages)) {
-                this.langCache.set(language as Language,
-                    await Language.load(path.join(wasmDir, `tree-sitter-${config.grammar}.wasm`)));
+            const required = new Set(requestedLanguages);
+            for (const language of requestedLanguages) {
+                if (language === 'c' || language === 'objcpp') required.add('cpp');
+                if (['vue', 'svelte', 'astro', 'ejs'].includes(language)) {
+                    required.add('javascript');
+                    required.add('typescript');
+                }
+            }
+            for (const language of required) {
+                const config = languages[language];
+                if (!config.grammar || this.langCache.has(language)) continue;
+                const filename = `tree-sitter-${config.grammar}.wasm`;
+                const source = 'wasm' in config ? config.wasm : `tree-sitter-wasms/out/${filename}`;
+                const bundledFile = path.join(packagedWasmDir, filename);
+                const wasmPath = packaged && fs.existsSync(bundledFile) ? bundledFile : path.join(extensionPath, 'node_modules', source);
+                if (!grammarCache.has(wasmPath)) {
+                    grammarCache.set(wasmPath, Language.load(wasmPath).catch((error: unknown) => {
+                        grammarCache.delete(wasmPath);
+                        throw error;
+                    }));
+                }
+                this.langCache.set(language, await grammarCache.get(wasmPath));
             }
             this.initialized = true;
         } catch (e) {
@@ -57,27 +79,25 @@ export class CodeParser {
             this.parser.setLanguage(lang);
             return this.parser.parse(content);
         } catch (e) {
-            console.error(`Failed to parse ${language} code:`, e);
+            console.error(`${language} 구문 분석 실패:`, e);
             return null;
         }
     }
 
-    /** 파서와 문법의 WASM 자원을 해제한다. */
+    /** 파서 자원을 해제하며 불변 문법은 다음 색인에서도 재사용한다. */
     public dispose(): void {
         this.parser?.delete();
         this.parser = null;
-        for (const language of this.langCache.values()) language.delete?.();
         this.langCache.clear();
         this.initialized = false;
     }
 
     /** 지원하는 소스 확장자를 언어 이름으로 변환한다. */
     public static getLanguageFromFile(filePath: string): Language | null {
+        // 생성된 의존성 잠금 파일의 수천 개 키가 코드 그래프를 채우지 않게 한다.
+        if (['package-lock.json','npm-shrinkwrap.json','pnpm-lock.yaml','yarn.lock'].includes(path.basename(filePath).toLowerCase())) return null;
         const extension = path.extname(filePath);
         if (extension === '.C' || extension === '.H') return 'cpp';
-        for (const [language, config] of Object.entries(languages)) {
-            if (config.extensions.includes(extension.toLowerCase())) return language as Language;
-        }
-        return null;
+        return languageByExtension.get(extension.toLowerCase()) || null;
     }
 }

@@ -1,36 +1,54 @@
-import { Language, Relation } from '../../common/types';
+import { Language, Relation, SymbolInfo } from '../../common/types';
 import { AstLanguageAnalyzer, LanguageAnalyzer } from './base';
-import { NodeDeclaration, arrowFunctionName, BUILTIN_TYPE_NAMES, EXTERNAL_RECEIVER_ROOTS, extractCleanType, findLexicalBinding, lookupReceiverType, nodeRange, resolveImportPath } from '../declarations';
+import { NodeDeclaration, arrowFunctionName, BUILTIN_TYPE_NAMES, EXTERNAL_RECEIVER_ROOTS, extractCleanType, findLexicalBinding, lookupReceiverType, nodeRange, resolveImportPath, visitAst } from '../declarations';
 /** JS 계열의 선언·스코프·객체 수신자·모듈과 호출을 해석한다. */
 export class JavascriptAnalyzer extends AstLanguageAnalyzer {
-    public readonly importExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'];
+    public readonly importExtensions = ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.ets', '.vue', '.svelte', '.astro', '.ejs'];
     protected readonly typeReferences: boolean = false;
     protected readonly defaultAssignmentParameters: boolean = true;
     /** 파생 TypeScript 전략도 같은 런타임 문법 규칙을 공유한다. */
     constructor(language: Language = 'javascript') { super(language, 'script'); }
     /** JS 선언과 이름 있는 화살표 함수·모듈 변수를 분류한다. */
     public getDeclaration(node: any): NodeDeclaration | null {
-        const name = node.childForFieldName('name')?.text || '';
-        if (node.type === 'class_declaration')
-            return { name, kind: 'class' };
-        if (node.type === 'function_declaration')
-            return { name, kind: 'function' };
+        const isDefault = node.parent?.type === 'export_statement' && node.parent.children.some((child: any) => child.type === 'default');
+        const exports = isDefault ? { exportNames: ['default'] } : {};
+        const name = node.childForFieldName('name')?.text || (isDefault ? 'default' : '');
+        if (node.type === 'class_declaration' || node.type === 'class' && isDefault)
+            return { name, kind: 'class', ...exports };
+        if (node.type === 'function_declaration' || node.type === 'generator_function_declaration')
+            return { name, kind: 'function', ...exports };
         if (node.type === 'method_definition')
             return { name, kind: 'method' };
-        if (node.type === 'arrow_function')
-            return { name: arrowFunctionName(node), kind: ['public_field_definition', 'field_definition'].includes(node.parent?.type) ? 'method' : 'function' };
+        if (['arrow_function', 'function_expression', 'generator_function'].includes(node.type))
+            return { name: arrowFunctionName(node) || (isDefault ? 'default' : ''), kind: ['public_field_definition', 'field_definition'].includes(node.parent?.type) ? 'method' : 'function', ...exports };
         if (node.type === 'variable_declarator') {
             const value = node.childForFieldName('value');
-            if (value && value.type !== 'arrow_function' && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) && !this.isInsideFunctionLike(node))
+            if (value && !['arrow_function', 'function_expression', 'generator_function'].includes(value.type) && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) && !this.isInsideFunctionLike(node))
                 return { name, kind: 'variable' };
         }
         return null;
     }
+    /** 로컬 export 절과 default 식의 별칭을 실제 최상위 선언에 붙인다. */
+    public extractSymbols(tree: any, filePath: string): SymbolInfo[] {
+        const symbols = super.extractSymbols(tree, filePath);
+        visitAst(tree.rootNode, node => {
+            if (node.type !== 'export_statement' || node.childForFieldName('source')) return;
+            const value = node.childForFieldName('value');
+            const aliases = node.descendantsOfType('export_specifier').map((specifier: any) =>
+                [specifier.childForFieldName('name')?.text, (specifier.childForFieldName('alias') ?? specifier.childForFieldName('name'))?.text]);
+            if (value?.type === 'identifier' && node.children.some((child: any) => child.type === 'default')) aliases.push([value.text, 'default']);
+            for (const [original, exported] of aliases) {
+                const symbol = symbols.find(candidate => candidate.id === `${filePath}::${original}`);
+                if (symbol && exported) symbol.exportNames = [...new Set([...(symbol.exportNames || []), exported])];
+            }
+        });
+        return symbols;
+    }
     /** 클래스·함수·메서드·화살표 함수만 렉시컬 범위를 구성한다. */
     protected scopeName(node: any): string {
-        if (['class_declaration', 'function_declaration', 'method_definition'].includes(node.type))
-            return node.childForFieldName('name')?.text || '';
-        return node.type === 'arrow_function' ? arrowFunctionName(node) : '';
+        if (['class_declaration', 'class', 'function_declaration', 'generator_function_declaration', 'method_definition'].includes(node.type))
+            return this.getDeclaration(node)?.name || '';
+        return ['arrow_function', 'function_expression', 'generator_function'].includes(node.type) ? this.getDeclaration(node)?.name || '' : '';
     }
     /** 함수 내부 지역 변수를 모듈 심볼로 잘못 추출하지 않는다. */
     private isInsideFunctionLike(node: any): boolean {
@@ -122,6 +140,8 @@ export class JavascriptAnalyzer extends AstLanguageAnalyzer {
             const namespace = clause?.descendantsOfType('namespace_import')[0]?.namedChild(0)?.text;
             if (namespace)
                 bindings[namespace] = '*';
+            const defaultName = clause?.namedChildren.find((child: any) => child.type === 'identifier')?.text;
+            if (defaultName) bindings[defaultName] = 'default';
         }
         return bindings;
     }
@@ -158,8 +178,10 @@ export class JavascriptAnalyzer extends AstLanguageAnalyzer {
                 let receiver: string | undefined;
                 if (funcName === 'require') {
                     const argsNode = node.childForFieldName('arguments');
-                    if (argsNode && argsNode.namedChildCount > 0) {
-                        const argText = argsNode.namedChild(0).text.replace(/['"`]/g, '');
+                    const argument = argsNode?.namedChild(0);
+                    // 실행식이나 보간 문자열을 정적인 파일 의존성으로 확정하지 않는다.
+                    if (argument?.type === 'string') {
+                        const argText = argument.text.slice(1, -1);
                         const resolvedPath = resolveImportPath(filePath, argText);
                         relations.push({
                             id: `${filePath}::import::${resolvedPath}`,
@@ -213,6 +235,15 @@ export class JavascriptAnalyzer extends AstLanguageAnalyzer {
             if (sourceNode) {
                 const importPath = sourceNode.text.replace(/['"`]/g, '');
                 const resolvedPath = resolveImportPath(filePath, importPath);
+                const reexports: Record<string, string> = Object.create(null);
+                if (node.type === 'export_statement') {
+                    for (const specifier of node.descendantsOfType('export_specifier')) {
+                        const original = specifier.childForFieldName('name')?.text;
+                        const exported = specifier.childForFieldName('alias')?.text || original;
+                        if (original && exported) reexports[exported] = original;
+                    }
+                    if (node.children.some((child: any) => child.type === '*')) reexports['*'] = '*';
+                }
                 relations.push({
                     id: `${filePath}::import::${resolvedPath}@${node.startIndex}`,
                     sourceId: filePath,
@@ -220,6 +251,7 @@ export class JavascriptAnalyzer extends AstLanguageAnalyzer {
                     kind: 'import',
                     certainty: 'EXTRACTED',
                     bindings: this.importBindings(node),
+                    ...(node.type === 'export_statement' ? { reexports } : {}),
                     bindingScope: filePath,
                     range
                 });

@@ -48,7 +48,7 @@ flowchart LR
 
 VS Code 1.102 이상이 필요합니다. `llama.vscode` 0.0.73은 자체적으로 VS Code 1.109 이상을 요구하므로 함께 사용할 때는 두 확장의 요구사항을 모두 만족해야 합니다.
 
-1. 확장 보기의 `… → VSIX에서 설치`에서 빌드된 `lightweight-graph-mcp-1.1.0.vsix`를 설치합니다.
+1. 확장 보기의 `… → VSIX에서 설치`에서 빌드된 `lightweight-graph-mcp-1.2.0.vsix`를 설치합니다.
 2. VS Code 창을 다시 로드하고 분석할 프로젝트 폴더를 엽니다.
 3. **하단 상태표시줄의 `Graph: 그래프 생성`을 클릭**합니다.
 4. **현재 프로젝트 그래프 생성·갱신**을 선택하거나, **실시간 감시(Watch) 시작**을 선택해 소스 파일 변경 시 자동으로 그래프를 갱신합니다.
@@ -64,13 +64,15 @@ VS Code 1.102 이상이 필요합니다. `llama.vscode` 0.0.73은 자체적으�
 
 > 먼저 get_index_status로 상태를 확인해 줘. 색인이 없거나 코드가 변경됐다면 build_index로 갱신한 뒤 query_graph, shortest_path, get_god_nodes로 관련 코드를 분석해 줘.
 
-## 4. 지원 언어 (13개 언어)
+## 4. 지원 언어와 파일 형식
+
+1.2.0은 **54개 언어·파일 형식 전략, 44개 고유 WASM 문법, 135개 확장자**를 등록한다. JSX는 JavaScript, Gradle은 Groovy, Luau는 Lua, SystemVerilog는 Verilog 전략을 공유하므로 이를 별도 언어 수로 중복 계산하지 않는다. `.C`·`.H`는 C++로 판별하고 나머지 확장자는 대소문자를 정규화한다. Graphify 0.9.97의 코드 확장자 114개를 모두 인식한다. 확장자 개수에는 `.F`·`.f`처럼 대소문자만 다른 표기의 집계 차이가 있다.
 
 | 언어 | 주요 확장자 | 지원 범위 |
 | --- | --- | --- |
 | JavaScript | js, jsx, mjs, cjs | 선언·호출·임포트·상속(`extends`) |
 | TypeScript / TSX | ts, mts, cts, tsx | 선언·호출·임포트·상속(`extends`)·구현(`implements`), TSX 별도 문법 |
-| Python | py | 클래스·함수·호출·임포트·상속(부모 클래스) |
+| Python | py, pyi, pyw | 클래스·함수·호출·임포트·상속(부모 클래스) |
 | Java | java | 클래스·인터페이스·메서드·호출·임포트·상속·구현 |
 | Go | go | 타입·함수·메서드·호출·임포트, 메서드 receiver 범위 |
 | Rust | rs | struct·enum·trait·함수·impl 범위·호출·use |
@@ -79,7 +81,30 @@ VS Code 1.102 이상이 필요합니다. `llama.vscode` 0.0.73은 자체적으�
 | C# | cs | namespace·클래스·인터페이스·메서드·호출·using·상속 |
 | Objective-C | m | 클래스·메서드·C 함수 호출·include/import·상속 |
 | Objective-C++ | mm | Objective-C와 C++의 두 AST를 병합하는 **부분 지원** |
-| CUDA | cu, cuh | C++ 문법으로 선언·일반 호출을 추출하는 **부분 지원** |
+| CUDA / Metal | cu, cuh, metal | C++ 문법으로 선언·일반 호출을 추출하는 **부분 지원** |
+| Ruby | rb, rake, gemspec | 클래스·모듈·메서드·호출·require/load·상속 |
+| Kotlin / Scala | kt, kts, scala, sc | 클래스·함수·호출·임포트·상속, Kotlin 문법의 일부 유효 구문은 구문 경고 가능 |
+| PHP / Swift | php, phtml, php3~5, swift | 클래스·함수·메서드·호출·정적 의존성·상속 |
+| Lua / Luau | lua, luau, toc | 함수·호출·require, TOC의 Lua/XML 파일 목록. Luau 전용 타입은 부분 지원 |
+| Zig / Julia | zig, jl | 함수·호출·정적 임포트, Julia 모듈·구조체 |
+| PowerShell | ps1, psm1, psd1 | 함수·클래스·명령 호출·모듈/매니페스트 의존성 |
+| Elixir / Erlang | ex, exs, erl, hrl, escript | 모듈·함수·호출·정적 의존성 |
+| Groovy / Gradle / Dart | groovy, gradle, dart | 클래스·메서드·호출·임포트·상속 |
+| Fortran / Bash / R | f, for, f90, f95, f03, f08, sh, bash, zsh, r | 함수·서브루틴·호출·정적 의존성 |
+| OCaml / Common Lisp | ml, mli, lisp, cl, lsp, asd | 함수·모듈·선언·호출·임포트, mli 전용 문법 |
+| Solidity / Apex | sol, cls, trigger | 클래스/컨트랙트·함수·호출·상속. Apex는 Java 문법을 재사용하는 부분 지원 |
+| Verilog / SystemVerilog | v, vh, sv, svh | 모듈·인터페이스·함수·태스크·인스턴스화·include |
+| Pascal / Delphi | pas, pp, dpr, dpk, lpr, inc | 함수·프로시저·호출·uses, 대소문자 비구분 |
+| Vue / Svelte / Astro / EJS | vue, svelte, astro, ejs | 외곽 AST로 코드 영역 선택 후 JS/TS 분석. 원본 줄·열 유지. 템플릿 식·이벤트 의미 분석은 부분 지원 |
+| JSON / YAML / Terraform | json, yaml, yml, tf, tfvars, hcl | 구조 키·인프라 블록·명시적 참조. 설정의 일반 값을 심볼 이름으로 노출하지 않음 |
+| SQL | sql | 테이블·뷰·루틴 선언과 뷰의 테이블 참조, 방언별 구문은 부분 지원 |
+| XML / .NET / Razor | xml, slnx, csproj, fsproj, vbproj, xaml, lpk, razor, cshtml | 프로젝트 의존성·Razor C# 메서드·호출·using. XML은 HTML AST를 활용하는 구조 분석 |
+| 솔루션 / Delphi 폼 | sln, dfm, lfm | 프로젝트·구성요소·이벤트 참조의 텍스트 구조 분석. 바이너리 Delphi 폼 미지원 |
+| VB.NET / COBOL / Robot Framework | vb, cbl, cob, cobol, cpy, robot, resource | 명시적 블록·문단·키워드와 호출/의존성의 **부분 구조 분석** |
+| DreamMaker / BYOND | dm, dme, dmm, dmf, dmi | 함수·타입·include·맵 타입 참조·UI 구성요소의 **부분 구조 분석**, DMI는 PNG 상태 메타데이터만 추출 |
+| Markdown 계열 / 텍스트 | md, mdx, qmd, skill, txt, rst | Markdown 제목·로컬 링크 구조. 일반 텍스트의 의미 추론은 제공하지 않음 |
+
+완전한 정적 타입 검사나 동적 디스패치 해석을 뜻하지 않는다. VB.NET·COBOL·DreamMaker·Robot은 부분 지원 파일로 보고한다. PDF·Office·이미지의 의미 분석, 오디오/동영상 전사와 LLM 추론은 포함하지 않는다. Python·Graphify 설치나 API 키 없이 로컬에서 실행한다. 생성된 package-lock.json·npm-shrinkwrap.json·pnpm-lock.yaml·yarn.lock은 그래프 잡음을 줄이기 위해 제외한다. 모든 정확한 확장자 매핑은 `src/common/languages.json`이 기준이며 MCP `get_index_status`와 CLI `status`도 `supportedLanguages`·`supportedExtensions`를 반환한다.
 
 ## 5. 생성 파일과 Graphify와 유사한 구조
 
@@ -117,35 +142,57 @@ JS·TS·Python의 사용자 정의 `get`, `set`, `resolve` 메서드는 수신�
 
 ## 7. 빌드와 검증
 
+1.2.0 다국어 회귀 검사는 아래 명령으로 실행한다. 첫 검사는 Graphify 확장자 목록, 44개 신규 입력, 대소문자 규칙, 주석·문자열 오인식, 동적 임포트 오인식, 컴포넌트 위치, DMI 경계 검증, 선언 없는 파일, 문법 초기화 40회, Watch를 확인한다.
+
 ```powershell
-.\.build\npm.cmd run bundle
-.\.build\nodejs\node\node.exe .test\check.cjs
-.\.build\nodejs\node\node.exe .test\mcp.cjs
-.\.build\nodejs\node\node.exe .test\optimization.cjs
-.\.build\npm.cmd test
-.\.build\npm.cmd run package
+.\.tools\.build\nodejs\node\node.exe .test\language-support.cjs
+.\.tools\.build\nodejs\node\node.exe .test\language-analyzers.cjs
+```
+
+실제 Graphify 비교는 선택 사항이며, 설치된 환경의 문법을 추가 설치하거나 변경하지 않는다. 비교 결과는 `.test/language-comparison/.tools/.graphify/`에 저장한다. 비교 기준 버전·확장자 목록·탐색기 SHA-256은 `.test/graphify-language-reference.json`, 추출기별 해시는 비교 결과에 보존한다.
+
+```powershell
+& "<Graphify의 python.exe>" -B .test\compare-language-support.py .test\language-comparison
+.\.tools\.build\nodejs\node\node.exe .test\compare-language-support.cjs
+```
+
+Graphify 0.9.97과 양쪽이 실행된 33개 기본 입력에서 기대 심볼은 69개 중 이 프로젝트 69개·Graphify 55개, 기대 호출은 23개 중 이 프로젝트 23개·Graphify 20개였다. 선택 의존성 미설치로 Graphify가 실행되지 않은 11개 입력은 집계에서 제외했다. 작은 기본 구문 반례에 대한 결과이며 모든 언어·프로젝트의 정확도 추정치가 아니다. 원시 AST 비교는 엔진 전체의 파일 간 해석 비교와 구분한다.
+
+WASM 자산은 약 100 MB로 늘었으며 VSIX에 필요한 문법만 포함한다. 문법은 프로세스별로 한 번 로드하고 파서 인스턴스를 정리해 반복 생성 시 WASM 함수 테이블 고갈을 방지한다. 선언이 없는 파일도 캐시의 `files`에 남아 임포트 대상·내보내기 파일 노드로 보존된다. 업데이트 후에는 **그래프 전체 재생성**을 실행하고 MCP 프로세스를 재시작한다.
+
+```powershell
+.\.tools\.build\npm.cmd run bundle
+.\.tools\.build\nodejs\node\node.exe .test\check.cjs
+.\.tools\.build\nodejs\node\node.exe .test\mcp.cjs
+.\.tools\.build\nodejs\node\node.exe .test\optimization.cjs
+.\.tools\.build\npm.cmd test
+.\.tools\.build\npm.cmd run package
 ```
 
 실제 Graphify가 설치된 별도 Python 환경이 있다면 다음 비교 검사로 동일 JS·TS·Python 반례와 현재 `src` 복사본을 양쪽 엔진에서 생성할 수 있습니다. 비교 전용 검사이며 일반 실행에는 Graphify가 필요하지 않습니다. 결과와 입력 복사본은 `.test/review-*/`에 남고 그래프·캐시는 각 복사본의 `.tools/.graphify/`에 저장됩니다.
 
 ```powershell
-.\.build\nodejs\node\node.exe .test\graphify-review.cjs "<Graphify 환경의 python.exe>" --project
-.\.build\nodejs\node\node.exe .test\optimization.cjs "<Graphify 환경의 python.exe>"
+.\.tools\.build\nodejs\node\node.exe .test\graphify-review.cjs "<Graphify 환경의 python.exe>" --project
+.\.tools\.build\nodejs\node\node.exe .test\optimization.cjs "<Graphify 환경의 python.exe>"
 ```
 
 `optimization.cjs`는 증분 갱신·캐시 재로드·이전 캐시 복원·렉시컬 스코프·임포트 우선순위·질의 제한을 확인하고 성능을 기록합니다. Python의 `.helpers`, `..helpers`, `from .. import` 및 없는 상대 모듈의 루트 대체 방지도 검사합니다. Graphify 환경을 전달하면 후보 선택 10개·전역 추론 신뢰도·Python 상대 임포트 4개를 직접 대조하며, 설치 버전과 후보·호출 해석 모듈의 SHA-256을 결과에 저장합니다. 이전 구현이 `.test/optimization-before/src/`에 있으면 동일 입력의 변경 전후 성능도 비교합니다. 기준본이 없으면 현재 구현 검사·측정만 실행합니다. Jest 검사도 `.test/*.test.ts`에 있으며, 해석기 fixture는 원시 관계인 `extractedRelations`를 채웁니다. 검사 스크립트는 Git 관리 대상으로 열어 두고 생성 디렉터리·기준본·그래프는 계속 제외합니다.
 
-Graphify 대비 실행 시간은 `.test/performance.cjs <Graphify의 python.exe>`로 실제 소스 두 개와 혼합 30·300파일을 각각 5블록 측정할 수 있습니다. 같은 명령에 `--python-only`를 붙이면 캐시 정책 차이를 확인할 Python 전용 300파일을 측정합니다. 두 명령 모두 `.build/nodejs/node/node.exe`로 실행합니다. AST·관계 해석·내부 JSON 저장을 대상으로 첫 실행·프로세스 내 반복·파일 변경·프로세스 재시작을 구분하며, Graphify의 순차·4워커 설정을 모두 실행합니다. 완료 후 `.test/performance-audit.cjs <결과 디렉터리> <Graphify의 python.exe>`로 입력 해시·호출 정답·오연결·변경 반영·재시작 일관성을 검증합니다. 전체 CLI 기능이나 모든 입력의 성능 동등성을 보장하는 검사는 아닙니다.
+Graphify 대비 실행 시간은 `.test/performance.cjs <Graphify의 python.exe>`로 실제 소스 두 개와 혼합 30·300파일을 각각 5블록 측정할 수 있습니다. 같은 명령에 `--python-only`를 붙이면 캐시 정책 차이를 확인할 Python 전용 300파일을 측정합니다. 두 명령 모두 `.tools/.build/nodejs/node/node.exe`로 실행합니다. AST·관계 해석·내부 JSON 저장을 대상으로 첫 실행·프로세스 내 반복·파일 변경·프로세스 재시작을 구분하며, Graphify의 순차·4워커 설정을 모두 실행합니다. 완료 후 `.test/performance-audit.cjs <결과 디렉터리> <Graphify의 python.exe>`로 입력 해시·호출 정답·오연결·변경 반영·재시작 일관성을 검증합니다. 전체 CLI 기능이나 모든 입력의 성능 동등성을 보장하는 검사는 아닙니다.
 
-정확도는 `.test/accuracy.cjs <Graphify의 python.exe> --assert`로 별도로 검사합니다. 현재 26개 반례에서 임포트 별칭·네임스페이스·지역/매개변수 가림·중첩 함수·내장 이름 재정의·Java/C#/C++ 수신자 호출의 누락과 오연결을 대조합니다. 이 반례의 정밀도/재현율은 전체 프로젝트 정확도 추정치가 아닙니다. `.test/html-safety.cjs`와 `.test/config-safety.ps1`은 HTML 표시와 잘못된 기존 설정의 보존을 검사합니다. 성능은 정확도 검사를 통과한 코드로 비교하며, 최종 큰 입력 재측정은 `performance.cjs`의 `--large-only`를 사용합니다.
+정확도는 `.test/accuracy.cjs <Graphify의 python.exe> --assert`로 별도로 검사합니다. 현재 34개 반례에서 기본·이름 있는 임포트 별칭·재수출·네임스페이스·지역/매개변수 가림·함수 표현식·제너레이터·중첩 함수·내장 이름 재정의·Java/C#/C++ 수신자 호출의 누락과 오연결을 대조합니다. 이 반례의 정밀도/재현율은 전체 프로젝트 정확도 추정치가 아닙니다. `.test/html-safety.cjs`와 `.test/config-safety.ps1`은 HTML 표시와 잘못된 기존 설정의 보존을 검사합니다. 성능은 정확도 검사를 통과한 코드로 비교하며, 최종 큰 입력 재측정은 `performance.cjs`의 `--large-only`를 사용합니다. 이 옵션은 외부 `NativeSound` 프로젝트 없이 혼합 언어·Python 각 300파일을 검사합니다.
+
+`.test/audit-20261029.cjs`는 파일 의존성·정확한 ID의 호출자 조회·Java/C# 오버로드 보존·중첩 상속 영향도·상대 tsconfig 상속과 순환·Terraform data/locals·Markdown 링크 오인식·동적 require·미사용 문법 없는 색인을 확인합니다.
 
 ## 8. 해석 구조와 Graphify 개선 반영
 
 `GraphIndex`는 추출 사실과 저장을 관리합니다. `extractedRelations`에 원시 AST 관계를 보존하고, 해석할 때마다 복사본에서 임포트·호출을 다시 연결하므로 대상 변경·제거 후 이전 연결이 남지 않습니다. 이전 캐시에 원시 사실이 없으면 프로젝트 내부의 기존 소스를 다시 파싱하며, 파일을 삭제하지 않습니다.
 
-임포트의 `bindings`와 `bindingScope`는 원래 이름·별칭·함수 내부 범위를 보존하고, 값 바인딩의 `lexicalBinding`은 다른 범위의 동명 호출 후보를 차단합니다. 타입 미상 매개변수도 바깥 변수의 타입을 가립니다. 새 추출 규칙은 기존 캐시를 전체 재생성해야 반영됩니다. 분기별 재할당 흐름·복잡한 동적 디스패치·별칭 재수출은 완전한 컴파일러 분석을 제공하지 않습니다.
+임포트의 `bindings`와 `bindingScope`는 원래 이름·별칭·함수 내부 범위를 보존하고, 값 바인딩의 `lexicalBinding`은 다른 범위의 동명 호출 후보를 차단합니다. 타입 미상 매개변수도 바깥 변수의 타입을 가립니다. `exportNames`와 `reexports`는 기본 내보내기와 로컬 export 별칭·이름 있는 재수출·별표 재수출을 실제 선언에 연결합니다. 재수출의 순환·모호성을 차단하며 `export *`는 default를 전달하지 않습니다. 새 추출 규칙은 기존 캐시를 전체 재생성해야 반영됩니다. 분기별 재할당 흐름·복잡한 동적 디스패치·모듈 가시성 검증은 완전한 컴파일러 분석을 제공하지 않습니다.
 
-별칭 보강 범위는 이름 있는 임포트의 `as` 별칭과 네임스페이스입니다. 기본 내보내기 별칭의 완전 해석은 제공하지 않습니다. 실제 소스 대조에서도 문맥 객체에서 꺼낸 콜백의 대상 두 건이 미해결로 남아 있으므로, 회귀 반례 통과를 전체 코드베이스의 정확도 100%로 해석하면 안 됩니다.
+기본 내보내기는 이름 있는 함수·클래스, 익명 함수와 화살표 함수, 기존 선언 식을 지원합니다. 임의의 default 실행식·CommonJS 반출·객체에서 꺼낸 콜백은 완전히 해석하지 않습니다. Java·C#·Apex의 동명 함수는 위치를 붙인 ID로 각각 보존하며, 인자·타입에 따른 오버로드 선택은 확정하지 않습니다. 상대 tsconfig `extends`는 순환을 차단하고 부모 설정의 경로 기준을 보존하지만 패키지 이름·배열 extends는 지원하지 않습니다.
+
+색인은 입력 언어와 C 헤더·Objective-C++·컴포넌트의 보조 문법만 로드합니다. 동일 인스턴스에서 내용이 그대로인 파일은 심볼·관계를 다시 교체하지 않습니다. 파일 경로의 의존성 조회에는 파일 내부 심볼의 관계도 포함하며, 정확한 심볼 ID의 호출자 조회에는 미해결 동명 호출을 섞지 않습니다. 영향도 탐색은 역방향 인접 목록을 한 번 만들고 Python·중첩 클래스·중간 구현이 없는 상속도 탐색합니다.
 
 ```mermaid
 flowchart LR

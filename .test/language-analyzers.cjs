@@ -16,7 +16,9 @@ async function main() {
     const { AstLanguageAnalyzer, getLanguageAnalyzer, analyzeFile } = require('../src/core/analyzers.ts');
     const parser = new CodeParser();
     await parser.initialize(path.resolve(__dirname, '..'));
-    const baseline = new Map(require('./language-baseline.json').map(row => [row.file, row.analysis]));
+    // 기준본을 만든 PC의 프로젝트 경로만 치환하며 추출 사실과 위치는 그대로 비교한다.
+    const originalRoot = 'D:\\Projects\\_Personal\\Google-Jules-Temp-Repo\\lightweight-graph-mcp';
+    const baseline = new Map(JSON.parse(JSON.stringify(require('./language-baseline.json')).replaceAll(JSON.stringify(originalRoot).slice(1,-1), JSON.stringify(path.resolve(__dirname,'..')).slice(1,-1))).map(row => [row.file, row.analysis]));
     try {
         for (const sample of require('./languages.json')) {
             const language = CodeParser.getLanguageFromFile(sample.file);
@@ -33,7 +35,10 @@ async function main() {
             /** 추상 전략의 노드 관계 계약을 명시적으로 구현한다. */
             extractNodeRelations() { return []; }
             /** 독립 선언 추출 전략의 결과를 반환한다. */
-            extractSymbols(_tree, filePath) { return [{ id: `${filePath}::custom` }]; }
+            extractSymbols(_tree, filePath) {
+                return [{ id: `${filePath}::custom`, name: 'custom', kind: 'function', filePath, language: 'javascript',
+                    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } }];
+            }
             /** 독립 관계 추출 전략의 결과를 반환한다. */
             extractRelations() { return []; }
         }

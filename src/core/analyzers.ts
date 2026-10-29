@@ -15,6 +15,10 @@ import { createAnalyzer as csharp } from './language/csharp';
 import { createAnalyzer as objc } from './language/objc';
 import { createAnalyzer as objcpp } from './language/objcpp';
 import { createAnalyzer as cuda } from './language/cuda';
+import { ExtendedLanguageAnalyzer } from './language/extended';
+import { StructuredLanguageAnalyzer } from './language/structured';
+import { ComponentLanguageAnalyzer } from './language/components';
+import { TextLanguageAnalyzer } from './language/text';
 // 언어 설정에 키를 추가하고 생성 함수를 빠뜨리면 타입 검사가 실패한다.
 const ANALYZER_FACTORIES = {
     javascript,
@@ -29,7 +33,48 @@ const ANALYZER_FACTORIES = {
     csharp,
     objc,
     objcpp,
-    cuda
+    cuda,
+    ruby: () => new ExtendedLanguageAnalyzer('ruby'),
+    kotlin: () => new ExtendedLanguageAnalyzer('kotlin'),
+    scala: () => new ExtendedLanguageAnalyzer('scala'),
+    php: () => new ExtendedLanguageAnalyzer('php'),
+    swift: () => new ExtendedLanguageAnalyzer('swift'),
+    lua: () => new ExtendedLanguageAnalyzer('lua'),
+    zig: () => new ExtendedLanguageAnalyzer('zig'),
+    powershell: () => new ExtendedLanguageAnalyzer('powershell'),
+    elixir: () => new ExtendedLanguageAnalyzer('elixir'),
+    julia: () => new ExtendedLanguageAnalyzer('julia'),
+    groovy: () => new ExtendedLanguageAnalyzer('groovy'),
+    dart: () => new ExtendedLanguageAnalyzer('dart'),
+    fortran: () => new ExtendedLanguageAnalyzer('fortran'),
+    bash: () => new ExtendedLanguageAnalyzer('bash'),
+    r: () => new ExtendedLanguageAnalyzer('r'),
+    ocaml: () => new ExtendedLanguageAnalyzer('ocaml'),
+    ocaml_interface: () => new ExtendedLanguageAnalyzer('ocaml_interface'),
+    commonlisp: () => new ExtendedLanguageAnalyzer('commonlisp'),
+    erlang: () => new ExtendedLanguageAnalyzer('erlang'),
+    solidity: () => new ExtendedLanguageAnalyzer('solidity'),
+    verilog: () => new ExtendedLanguageAnalyzer('verilog'),
+    pascal: () => new ExtendedLanguageAnalyzer('pascal'),
+    razor: () => new ExtendedLanguageAnalyzer('razor'),
+    apex: () => new ExtendedLanguageAnalyzer('apex'),
+    vue: () => new ComponentLanguageAnalyzer('vue'),
+    svelte: () => new ComponentLanguageAnalyzer('svelte'),
+    astro: () => new ComponentLanguageAnalyzer('astro'),
+    ejs: () => new ComponentLanguageAnalyzer('ejs'),
+    json: () => new StructuredLanguageAnalyzer('json'),
+    yaml: () => new StructuredLanguageAnalyzer('yaml'),
+    terraform: () => new StructuredLanguageAnalyzer('terraform'),
+    sql: () => new StructuredLanguageAnalyzer('sql'),
+    xml: () => new StructuredLanguageAnalyzer('xml'),
+    markdown: () => new StructuredLanguageAnalyzer('markdown'),
+    sln: () => new TextLanguageAnalyzer('sln'),
+    vbnet: () => new TextLanguageAnalyzer('vbnet'),
+    cobol: () => new TextLanguageAnalyzer('cobol'),
+    dreammaker: () => new TextLanguageAnalyzer('dreammaker'),
+    dmi: () => new TextLanguageAnalyzer('dmi'),
+    robot: () => new TextLanguageAnalyzer('robot'),
+    delphi_form: () => new TextLanguageAnalyzer('delphi_form')
 } satisfies Record<Language, () => LanguageAnalyzer>;
 const analyzers = new Map<Language, LanguageAnalyzer>();
 /** 언어별 팩토리를 선택하고 파일별 상태가 없는 분석 전략을 재사용한다. */

@@ -4,14 +4,55 @@ out/
 .vscode-test/
 *.vsix
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs & Debug
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage & caches
+coverage/
+.nyc_output/
+.cache/
+.eslintcache
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Legacy .build folder
 .build/*
 !.build/*.ps1
 !.build/*.sh
 !.build/*.md
 !.build/*.cmd
 .build/activate.ps1
-.test/*
+
+# Tools build & portable environment
+.tools/.build/*
+!.tools/.build/*.ps1
+!.tools/.build/*.sh
+!.tools/.build/*.md
+!.tools/.build/*.cmd
+.tools/.build/activate.ps1
+.tools/.build/nodejs/
+.tools/.build/_state/
+
+# Graphify
 .tools/.graphify/
+graphify/
+
+# Editor / IDE
+.idea/
+*.swp
+*.swo
+
+# Tests whitelist
+.test/*
 !.test/check.cjs
 !.test/mcp.cjs
 !.test/languages.json
@@ -33,3 +74,10 @@ out/
 !.test/audit-20261029.cjs
 !.test/language-analyzers.cjs
 !.test/language-baseline.json
+!.test/language-support.cjs
+!.test/language-support.json
+!.test/graphify-language-reference.json
+!.test/compare-language-support.cjs
+!.test/compare-language-support.py
+!.test/vsix-language-support.py
+!.test/package-review.cjs
