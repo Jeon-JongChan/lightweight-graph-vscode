@@ -1,30 +1,33 @@
+# 의존성 및 빌드 산출물
 node_modules/
 dist/
 out/
 .vscode-test/
 *.vsix
+
+# 운영체제 메타데이터
 .DS_Store
 Thumbs.db
 Desktop.ini
 
-# Logs & Debug
+# 로그
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Test coverage & caches
+# 테스트 커버리지 및 캐시
 coverage/
 .nyc_output/
 .cache/
 .eslintcache
 
-# Environment & Secrets
+# 환경 변수 및 비밀 정보
 .env
 .env.*
 !.env.example
 
-# Legacy .build folder
+# .build 산출물과 허용된 보조 스크립트
 .build/*
 !.build/*.ps1
 !.build/*.sh
@@ -32,52 +35,53 @@ coverage/
 !.build/*.cmd
 .build/activate.ps1
 
-# Tools build & portable environment
+# .tools 포터블 빌드 환경
 .tools/.build/*
 !.tools/.build/*.ps1
 !.tools/.build/*.sh
 !.tools/.build/*.md
 !.tools/.build/*.cmd
 .tools/.build/activate.ps1
-.tools/.build/nodejs/
-.tools/.build/_state/
 
-# Graphify
+# Graphify 생성 데이터
 .tools/.graphify/
-graphify/
 
-# Editor / IDE
+# 로컬 테스트 작업물 및 생성 fixture
+.tools/.test/
+
+# 편집기 임시 파일
 .idea/
 *.swp
 *.swo
 
-# Tests whitelist
-.test/*
-!.test/check.cjs
-!.test/mcp.cjs
-!.test/languages.json
-!.test/graphify-review.cjs
-!.test/graphify-review.py
-!.test/optimization.cjs
-!.test/graphify-optimization.py
-!.test/*.test.ts
-!.test/performance.cjs
-!.test/performance-worker.cjs
-!.test/performance-worker.py
-!.test/performance-audit.cjs
-!.test/performance-newline.cjs
-!.test/accuracy.cjs
-!.test/html-safety.cjs
-!.test/config-safety.ps1
-!.test/cache-benchmark.ts
-!.test/resolution-benchmark.ts
-!.test/audit-20261029.cjs
-!.test/language-analyzers.cjs
-!.test/language-baseline.json
-!.test/language-support.cjs
-!.test/language-support.json
-!.test/graphify-language-reference.json
-!.test/compare-language-support.cjs
-!.test/compare-language-support.py
-!.test/vsix-language-support.py
-!.test/package-review.cjs
+# .build/.test 허용 목록
+.build/.test/*
+!.build/.test/
+!.build/.test/check.cjs
+!.build/.test/mcp.cjs
+!.build/.test/languages.json
+!.build/.test/graphify-review.cjs
+!.build/.test/graphify-review.py
+!.build/.test/optimization.cjs
+!.build/.test/graphify-optimization.py
+!.build/.test/*.test.ts
+!.build/.test/performance.cjs
+!.build/.test/performance-worker.cjs
+!.build/.test/performance-worker.py
+!.build/.test/performance-audit.cjs
+!.build/.test/performance-newline.cjs
+!.build/.test/accuracy.cjs
+!.build/.test/html-safety.cjs
+!.build/.test/config-safety.ps1
+!.build/.test/cache-benchmark.ts
+!.build/.test/resolution-benchmark.ts
+!.build/.test/audit-20261029.cjs
+!.build/.test/language-analyzers.cjs
+!.build/.test/language-baseline.json
+!.build/.test/language-support.cjs
+!.build/.test/language-support.json
+!.build/.test/graphify-language-reference.json
+!.build/.test/compare-language-support.cjs
+!.build/.test/compare-language-support.py
+!.build/.test/vsix-language-support.py
+!.build/.test/package-review.cjs

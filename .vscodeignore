@@ -6,9 +6,12 @@ out/**
 dist/common/**
 dist/core/**
 dist/storage/**
+dist/extension/mcp-provider.js
+dist/extension/workspace.js
+dist/mcp/tools.js
 src/**
 tests/**
-.test/**
+.build/.test/**
 .docs/**
 .tools/**
 .gitignore
