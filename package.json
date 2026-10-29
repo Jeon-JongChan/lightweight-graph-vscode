@@ -1,0 +1,93 @@
+{
+  "name": "lightweight-graph-mcp",
+  "publisher": "graph-mcp-dev",
+  "displayName": "Lightweight Graph MCP",
+  "description": "Lightweight Code Graph MCP for VS Code, Antigravity & Codex",
+  "version": "1.1.0",
+  "engines": {
+    "vscode": "^1.102.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension/extension.js",
+  "contributes": {
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "lightweight-graph-mcp",
+        "label": "Lightweight Graph MCP"
+      }
+    ],
+    "commands": [
+      {
+        "command": "graph-mcp.quickActions",
+        "title": "Graph MCP: 빠른 실행"
+      },
+      {
+        "command": "graph-mcp.toggleWatch",
+        "title": "Graph MCP: 실시간 감시(Watch) 시작·중지"
+      },
+      {
+        "command": "graph-mcp.manageMcp",
+        "title": "Graph MCP: MCP 서버 시작·중지"
+      },
+      {
+        "command": "graph-mcp.setupAgents",
+        "title": "Graph MCP: Antigravity · Codex 전역 연결"
+      },
+      {
+        "command": "graph-mcp.buildIndex",
+        "title": "Graph MCP: Build Index"
+      },
+      {
+        "command": "graph-mcp.rebuildIndex",
+        "title": "Graph MCP: Rebuild Index"
+      },
+      {
+        "command": "graph-mcp.clearCache",
+        "title": "Graph MCP: Clear Cache"
+      },
+      {
+        "command": "graph-mcp.showStatus",
+        "title": "Graph MCP: Show Status"
+      },
+      {
+        "command": "graph-mcp.openLogs",
+        "title": "Graph MCP: Open Logs"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle",
+    "bundle": "node esbuild.js --production",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src/**/*.ts",
+    "test": "jest",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^18.19.130",
+    "@types/vscode": "^1.90.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.0",
+    "@typescript-eslint/parser": "^8.72.0",
+    "@vscode/vsce": "^2.31.1",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.13.0",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.15",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^8.72.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.24.7"
+  }
+}

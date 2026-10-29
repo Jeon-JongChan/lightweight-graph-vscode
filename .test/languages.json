@@ -1,0 +1,15 @@
+[
+  { "file": "sample.js", "code": "import './sample.ts'; function helper() { return 1; } function run() { return helper(); }", "symbols": ["helper", "run"], "import": true },
+  { "file": "sample.ts", "code": "import '@/sample.tsx'; interface Work {} class RepoStore { save() {} } class Base { basePing() {} } class Service extends Base implements Work { private store = new RepoStore(); run(w: Work) { const localOnly = 1; new Base(); this.store.save(); this.basePing(); return helper(); } } function helper() { return 1; }", "symbols": ["Work", "RepoStore", "Base", "Service", "run", "helper"], "import": true, "inherit": true },
+  { "file": "sample.tsx", "code": "import './sample.js'; function helper() { return <div/>; } const View = () => helper();", "symbols": ["helper", "View"], "import": true },
+  { "file": "sample.py", "code": "class Base:\n    pass\ndef helper():\n    return 1\nclass Service(Base):\n    def run(self, b: Base) -> Base:\n        return helper()\n", "symbols": ["Base", "helper", "Service", "run"], "inherit": true },
+  { "file": "Sample.java", "code": "import demo.Work; class Base { int inherited() { return 1; } } class Service extends Base implements Work { int helper() { return 1; } int run() { return helper() + inherited(); } }", "symbols": ["Base", "Service", "helper", "run", "inherited"], "import": true, "inherit": true },
+  { "file": "sample.go", "code": "package demo\nimport \"fmt\"\ntype Service struct{}\nfunc helper() int { return 1 }\nfunc (s *Service) Run() int { return helper() }", "symbols": ["Service", "helper", "Run"], "import": true },
+  { "file": "sample.rs", "code": "use crate::base::Base; struct Service; impl Service { fn run(&self) -> i32 { helper() } } fn helper() -> i32 { 1 }", "symbols": ["Service", "run", "helper"], "import": true },
+  { "file": "sample.c", "code": "#include \"dep.h\"\ntypedef struct Service { int value; } Service; int helper(void) { return 1; } int run(void) { return helper(); }", "symbols": ["Service", "helper", "run"], "import": true },
+  { "file": "sample.cpp", "code": "#include \"dep.hpp\"\nnamespace demo { class Service : public Base { public: int run() { return helper(); } }; int helper() { return 1; } }", "symbols": ["Service", "run", "helper"], "import": true, "inherit": true },
+  { "file": "Sample.cs", "code": "using Demo; namespace App { class Service : Base { int Helper() { return 1; } int Run() { return Helper() + helper(); } } }", "symbols": ["Service", "Helper", "Run"], "import": true, "inherit": true },
+  { "file": "sample.m", "code": "#import <Foundation/Foundation.h>\n@interface Service : NSObject\n- (int)run;\n@end\n@implementation Service\n- (int)run { return helper(); }\n@end\nint helper(void) { return 1; }", "symbols": ["Service", "run", "helper"], "import": true, "inherit": true },
+  { "file": "sample.mm", "code": "class Native { public: int value() { return helper(); } }; int helper() { return 1; } @interface Service : NSObject @end", "symbols": ["Native", "value", "helper", "Service"] },
+  { "file": "sample.cu", "code": "int helper() { return 1; } __global__ void kernel() { helper(); }", "symbols": ["helper", "kernel"] }
+]
