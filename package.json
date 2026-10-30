@@ -1,9 +1,14 @@
 {
   "name": "lightweight-graph-mcp",
-  "publisher": "graph-mcp-dev",
+  "publisher": "lightweight",
   "displayName": "Lightweight Graph MCP",
   "description": "Lightweight Code Graph MCP for VS Code, Antigravity & Codex",
   "version": "1.2.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jeon-JongChan/lightweight-graph-vscode.git"
+  },
   "engines": {
     "vscode": "^1.102.0"
   },

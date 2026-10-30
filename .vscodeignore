@@ -19,5 +19,6 @@ tests/**
 tsconfig.json
 jest.config.js
 esbuild.js
+eslint.config.js
 **/*.map
 **/*.ts
