@@ -6,11 +6,13 @@
 param(
     [ValidateSet('Setup', 'ServeMcp', 'Paths', 'Status')]
     [string]$Action = 'Setup',
-    [string]$WorkspaceRoot = ''
+    [string]$WorkspaceRoot = '',
+    [string]$NodePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = $Utf8NoBom
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $PortableNode = Join-Path $ProjectRoot '.tools\.build\nodejs\node\node.exe'
@@ -19,7 +21,13 @@ $LauncherCmd = Join-Path $ProjectRoot 'graph-mcp.cmd'
 $SkillSourceFile = Join-Path $ProjectRoot 'skill\SKILL.md'
 
 function Resolve-NodeExe {
-    <# 포터블 Node.js 또는 시스템 Node.js 실행 파일 경로를 반환한다. #>
+    <# 확장에서 전달한 런타임을 우선하고 CLI에서는 로컬·시스템 Node.js를 찾는다. #>
+    if ($NodePath) {
+        if (-not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
+            throw "전달된 Node.js 런타임이 없습니다: $NodePath"
+        }
+        return $NodePath
+    }
     if (Test-Path -LiteralPath $PortableNode) {
         return $PortableNode
     }
@@ -34,7 +42,7 @@ function Resolve-NodeExe {
             return $PortableNode
         }
     }
-    throw "Node.js 런타임을 찾지 못했습니다: $PortableNode"
+    throw 'Node.js 런타임을 찾지 못했습니다. VS Code의 전역 연결 메뉴를 사용하거나 Node.js를 설치하세요.'
 }
 
 function Write-Utf8File([string]$Path, [string]$Content) {
@@ -84,6 +92,14 @@ function Update-JsonMcpConfig([string]$ConfigPath, [string]$ServerKey, [string]$
     }
     $entry['command'] = $CommandPath
     $entry['args'] = $CommandArgs
+    $runtimeEnv = @{}
+    if ($servers.ContainsKey('lightweight-graph-mcp') -and $servers['lightweight-graph-mcp'].env) {
+        foreach ($prop in $servers['lightweight-graph-mcp'].env.PSObject.Properties) {
+            $runtimeEnv[$prop.Name] = $prop.Value
+        }
+    }
+    $runtimeEnv['ELECTRON_RUN_AS_NODE'] = '1'
+    $entry['env'] = [pscustomobject]$runtimeEnv
     $servers['lightweight-graph-mcp'] = [pscustomobject]$entry
     $rootObj[$ServerKey] = [pscustomobject]$servers
 
@@ -111,9 +127,24 @@ function Update-CodexConfig([string]$ConfigPath, [string]$CommandPath, [string[]
         $existing = [System.IO.File]::ReadAllText($ConfigPath, $Utf8NoBom)
     }
 
+    # 기존 환경변수 하위 테이블을 보존하고 Electron 실행 모드만 갱신한다.
+    $envPattern = '(?ms)^\[mcp_servers\.lightweight-graph-mcp\.env\]\r?\n.*?(?=^\[|\z)'
+    $envMatch = [regex]::Match($existing, $envPattern)
+    if ($envMatch.Success) {
+        $envKeyPattern = '(?m)^ELECTRON_RUN_AS_NODE\s*=.*$'
+        $envBlock = if ($envMatch.Value -match $envKeyPattern) {
+            [regex]::Replace($envMatch.Value, $envKeyPattern, 'ELECTRON_RUN_AS_NODE = "1"')
+        } else {
+            $envMatch.Value.Replace('[mcp_servers.lightweight-graph-mcp.env]', "[mcp_servers.lightweight-graph-mcp.env]`r`nELECTRON_RUN_AS_NODE = `"1`"")
+        }
+        $existing = $existing.Replace($envMatch.Value, $envBlock)
+    } else {
+        $block += "`r`nenv = { ELECTRON_RUN_AS_NODE = `"1`" }"
+    }
+
     $pattern = '(?ms)^\[mcp_servers\.lightweight-graph-mcp\]\r?\n.*?(?=^\[|\z)'
     if ($existing -match $pattern) {
-        $updated = [regex]::Replace($existing, $pattern, $block + "`r`n`r`n")
+        $updated = $existing.Replace([regex]::Match($existing, $pattern).Value, $block + "`r`n`r`n")
     } else {
         $trimmed = $existing.TrimEnd()
         $updated = if ($trimmed) { $trimmed + "`r`n`r`n" + $block + "`r`n" } else { $block + "`r`n" }

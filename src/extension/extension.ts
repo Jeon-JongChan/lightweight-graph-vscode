@@ -33,12 +33,17 @@ export function activate(context: vscode.ExtensionContext): void {
             }
         }),
         vscode.commands.registerCommand('graph-mcp.setupAgents', async () => {
-            const scriptPath = path.join(context.extensionPath, 'tools', 'config-graph-mcp.ps1');
-            await new Promise<void>((resolve, reject) => {
-                execFile('powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Action', 'Setup'],
-                    (err) => err ? reject(err) : resolve());
-            });
-            vscode.window.showInformationMessage('Graph MCP: Antigravity · Codex 전역 MCP 서버 및 스킬 등록을 완료했습니다.');
+            try {
+                const scriptPath = path.join(context.extensionPath, 'tools', 'config-graph-mcp.ps1');
+                await new Promise<void>((resolve, reject) => {
+                    execFile('powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Action', 'Setup', '-NodePath', process.execPath],
+                        { windowsHide: true, encoding: 'utf8' },
+                        (err, _stdout, stderr) => err ? reject(new Error(stderr?.trim() || err.message)) : resolve());
+                });
+                vscode.window.showInformationMessage('Graph MCP: 현재 설치 경로로 전역 MCP 서버 및 스킬을 갱신했습니다. 연결된 클라이언트에서 MCP 서버를 다시 시작하세요.');
+            } catch (error) {
+                vscode.window.showErrorMessage(`Graph MCP: 전역 MCP 연결 실패. ${error}`);
+            }
         }),
         vscode.commands.registerCommand('graph-mcp.quickActions', async () => {
             const watching = manager.isWatching();

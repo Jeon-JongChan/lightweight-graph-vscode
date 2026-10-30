@@ -22,3 +22,4 @@ esbuild.js
 eslint.config.js
 **/*.map
 **/*.ts
+**/*.log

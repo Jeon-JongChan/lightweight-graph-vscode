@@ -329,8 +329,8 @@ export function buildExportedGraph(data: GraphData, root: string = '') {
             }
             let bestLabel = labels.get(id)!;
             let bestScore = -1;
-            for (const [lbl, sc] of [...scores.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-                if (sc > bestScore) {
+            for (const [lbl, sc] of scores) {
+                if (sc > bestScore || (sc === bestScore && lbl.localeCompare(bestLabel) < 0)) {
                     bestScore = sc;
                     bestLabel = lbl;
                 }
@@ -354,18 +354,23 @@ export function buildExportedGraph(data: GraphData, root: string = '') {
         list.push(id);
     }
 
+    // 커뮤니티마다 전체 링크를 반복 순회하지 않고 단일 패스로 내부 간선 수를 집계한다.
+    const internalEdgesByLabel = new Map<string, number>();
+    for (const link of links) {
+        if (link.source !== link.target) {
+            const srcLabel = labels.get(link.source);
+            if (srcLabel !== undefined && srcLabel === labels.get(link.target)) {
+                internalEdgesByLabel.set(srcLabel, (internalEdgesByLabel.get(srcLabel) || 0) + 1);
+            }
+        }
+    }
+
     const sortedGroups = [...groups.values()].sort((a, b) => b.length - a.length || a[0].localeCompare(b[0]));
     const communities: CommunitySummary[] = [];
     const usedNames = new Map<string, number>();
 
     sortedGroups.forEach((memberIds, idx) => {
-        const memberSet = new Set(memberIds);
-        let internalEdges = 0;
-        for (const link of links) {
-            if (memberSet.has(link.source) && memberSet.has(link.target) && link.source !== link.target) {
-                internalEdges++;
-            }
-        }
+        const internalEdges = memberIds.length > 0 ? (internalEdgesByLabel.get(labels.get(memberIds[0])!) || 0) : 0;
         const n = memberIds.length;
         const maxEdges = n <= 1 ? 1 : (n * (n - 1)) / 2;
         const cohesion = n <= 1 ? 1.0 : Math.min(1.0, Math.round((internalEdges / maxEdges) * 100) / 100);
@@ -485,9 +490,11 @@ export function buildExportedGraph(data: GraphData, root: string = '') {
     }
     const importCycles: string[][] = [];
     const seenCycles = new Set<string>();
+    // shortcut: 조밀한 임포트 그래프의 경로 열거 폭발을 막는 탐색 20만 회·보고 100개 상한이다. 누락 보고가 문제되면 SCC 기반 탐지로 바꾼다.
+    let budget = 200_000;
     for (const startFile of [...fileSet].sort()) {
         const stack: Array<{ current: string; path: string[] }> = [{ current: startFile, path: [startFile] }];
-        while (stack.length > 0) {
+        while (stack.length > 0 && budget-- > 0 && importCycles.length < 100) {
             const { current, path: curPath } = stack.pop()!;
             for (const next of importAdj.get(current) || []) {
                 if (next === startFile && curPath.length > 1) {
@@ -496,7 +503,8 @@ export function buildExportedGraph(data: GraphData, root: string = '') {
                         seenCycles.add(cycleKey);
                         importCycles.push([...curPath, startFile]);
                     }
-                } else if (!curPath.includes(next) && curPath.length < 6) {
+                // 각 순환은 가장 작은 파일에서 한 번만 찾으므로 시작 파일보다 작은 파일은 건너뛴다.
+                } else if (next > startFile && !curPath.includes(next) && curPath.length < 6) {
                     stack.push({ current: next, path: [...curPath, next] });
                 }
             }

@@ -2,9 +2,8 @@ import * as path from 'path';
 import { SymbolInfo } from '../common/types';
 
 /** 경로가 테스트 디렉터리 또는 테스트 파일 명명 규칙에 해당하는지 판별한다. */
-function isTestPath(filePath: string): boolean {
-    if (!filePath) return false;
-    const norm = filePath.replace(/\\/g, '/');
+function isTestPath(norm: string): boolean {
+    if (!norm) return false;
     const parts = norm.split('/');
     if (parts.some(seg => ['test', 'tests', 'spec', 'specs', '__tests__', '.test'].includes(seg.toLowerCase()))) {
         return true;
@@ -18,12 +17,18 @@ export function disambiguateCandidates(candidates: SymbolInfo[], callSiteFile: s
     if (candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0];
     const sourceFile = callSiteFile.replace(/\\/g, '/');
-    const files = new Map(candidates.map(candidate => [candidate.id, candidate.filePath.replace(/\\/g, '/')]));
+    const files = new Map<string, string>();
+    const testCands: SymbolInfo[] = [];
+    const nonTestCands: SymbolInfo[] = [];
 
-    const callerIsTest = isTestPath(callSiteFile);
-    const testCands = candidates.filter(c => isTestPath(c.filePath));
-    const nonTestCands = candidates.filter(c => !isTestPath(c.filePath));
+    for (const candidate of candidates) {
+        const norm = candidate.filePath.replace(/\\/g, '/');
+        files.set(candidate.id, norm);
+        if (isTestPath(norm)) testCands.push(candidate);
+        else nonTestCands.push(candidate);
+    }
 
+    const callerIsTest = isTestPath(sourceFile);
     let survivors: SymbolInfo[];
     if (callerIsTest) {
         const sameFileTest = testCands.filter(c => files.get(c.id) === sourceFile);

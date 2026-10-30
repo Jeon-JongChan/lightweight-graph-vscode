@@ -1,5 +1,5 @@
 import { GraphData, SymbolInfo, Relation } from '../common/types';
-import { buildExportedGraph, ExportedLink, ExportedNode, GodNodeInfo } from '../storage/export';
+import { buildExportedGraph, ExportedLink, ExportedNode, GodNodeInfo, portableId } from '../storage/export';
 
 /** 자연어 질문에서 시드 선택을 왜곡하는 영어·한국어 질문 불용어 목록이다. */
 const QUERY_STOPWORDS = new Set([
@@ -27,8 +27,40 @@ function tokenizeSearch(text: string): string[] {
 
 /** 코드 그래프에 대한 심볼 검색·호출 추적·서브그래프 탐색·구조 분석 도구를 제공한다. */
 export class GraphTools {
+    private cachedExport: {
+        data: GraphData;
+        symbols: GraphData['symbols'];
+        relations: GraphData['relations'];
+        symbolCount: number;
+        relationCount: number;
+        root: string;
+        exported: ReturnType<typeof buildExportedGraph>;
+    } | null = null;
+
     /** 그래프 데이터 공급자와 선택적 루트 경로를 연결한다. */
     constructor(private getGraphData: () => GraphData, private getWorkspaceRoot: () => string = () => '') {}
+
+    /** 동일한 그래프 스냅샷과 루트에 대해 내보내기 그래프(커뮤니티·핵심 노드 등)를 캐시해 재사용한다. */
+    private getExportedGraph() {
+        const data = this.getGraphData();
+        const root = this.getWorkspaceRoot();
+        const symbolCount = Object.keys(data.symbols).length;
+        const relationCount = Object.keys(data.relations).length;
+        if (
+            this.cachedExport &&
+            this.cachedExport.data === data &&
+            this.cachedExport.symbols === data.symbols &&
+            this.cachedExport.relations === data.relations &&
+            this.cachedExport.symbolCount === symbolCount &&
+            this.cachedExport.relationCount === relationCount &&
+            this.cachedExport.root === root
+        ) {
+            return this.cachedExport.exported;
+        }
+        const exported = buildExportedGraph(data, root);
+        this.cachedExport = { data, symbols: data.symbols, relations: data.relations, symbolCount, relationCount, root, exported };
+        return exported;
+    }
 
     /** 이름이나 식별자 패턴으로 심볼을 검색하고 일치도 순으로 반환한다. */
     public searchSymbols(query: string, maxNodes: number = 30): SymbolInfo[] {
@@ -54,7 +86,7 @@ export class GraphTools {
         return scored.slice(0, maxNodes).map(item => item.sym);
     }
 
-    /** 정확한 ID·접미사·이름 순으로 단일 심볼 정보를 찾는다. */
+    /** 정확한 ID·접미사·포터블 ID·이름 순으로 단일 심볼 정보를 찾는다. */
     public getSymbolInfo(symbolName: string): SymbolInfo | null {
         const data = this.getGraphData();
         if (data.symbols[symbolName]) {
@@ -65,6 +97,17 @@ export class GraphTools {
                 return data.symbols[id];
             }
         }
+        // query_graph·get_god_nodes 등이 반환하는 포터블 ID(예: src/a.ts::Foo) 및 슬래시 정규화 경로를 지원한다.
+        const norm = symbolName.trim().replace(/\\/g, '/');
+        if (norm.includes('/') || norm.includes('::')) {
+            const root = this.getWorkspaceRoot();
+            for (const id in data.symbols) {
+                const normId = id.replace(/\\/g, '/');
+                if (normId === norm || normId.endsWith(`/${norm}`) || normId.endsWith(`::${norm}`) || (root && portableId(id, root) === norm)) {
+                    return data.symbols[id];
+                }
+            }
+        }
         for (const id in data.symbols) {
             if (data.symbols[id].name === symbolName) {
                 return data.symbols[id];
@@ -73,17 +116,23 @@ export class GraphTools {
         return null;
     }
 
-    /** 특정 심볼 또는 파일이 의존하는 모든 관계를 반환한다. */
+    /** 특정 심볼 또는 파일(절대·상대 경로 모두 지원)이 의존하는 모든 관계를 반환한다. */
     public getDependencies(target: string): Relation[] {
         const data = this.getGraphData();
         const results: Relation[] = [];
         const targetSym = this.getSymbolInfo(target);
-        const isFile = data.files?.includes(target) || Object.values(data.symbols).some(symbol => symbol.filePath === target);
-        if (!targetSym && !isFile) return results;
+        const normTarget = target.trim().replace(/\\/g, '/');
+        const root = this.getWorkspaceRoot();
+        const allFiles = data.files?.length ? data.files : Object.values(data.symbols).map(symbol => symbol.filePath);
+        const matchedFile = allFiles.find(file => {
+            const normFile = file.replace(/\\/g, '/');
+            return file === target || normFile === normTarget || normFile.endsWith(`/${normTarget}`) || (root !== '' && portableId(file, root) === normTarget);
+        });
+        if (!targetSym && !matchedFile) return results;
 
         for (const id in data.relations) {
             const rel = data.relations[id];
-            if (isFile ? rel.sourceId === target || rel.sourceId.startsWith(`${target}::`)
+            if (matchedFile ? rel.sourceId === matchedFile || rel.sourceId.startsWith(`${matchedFile}::`)
                 : rel.sourceId === targetSym!.id || rel.sourceId === targetSym!.filePath) {
                 results.push(rel);
             }
@@ -213,13 +262,13 @@ export class GraphTools {
 
     /** 가장 연결이 많은 핵심 추상화 심볼(God Nodes) 상위 목록을 반환한다. */
     public getGodNodes(topN: number = 10): GodNodeInfo[] {
-        const exported = buildExportedGraph(this.getGraphData(), this.getWorkspaceRoot());
+        const exported = this.getExportedGraph();
         return exported.godNodes.slice(0, topN);
     }
 
     /** 탐지된 커뮤니티 요약과 특정 커뮤니티의 소속 노드를 반환한다. */
     public getCommunities(communityId?: number) {
-        const exported = buildExportedGraph(this.getGraphData(), this.getWorkspaceRoot());
+        const exported = this.getExportedGraph();
         if (communityId !== undefined) {
             const community = exported.communities.find(c => c.id === communityId) || null;
             const members = exported.nodes.filter(n => n.community === communityId);
@@ -241,7 +290,7 @@ export class GraphTools {
         if (!question.trim() || maxNodes <= 0) {
             return { question, mode, depth, seedNodes: [], nodes: [], links: [] };
         }
-        const exported = buildExportedGraph(this.getGraphData(), this.getWorkspaceRoot());
+        const exported = this.getExportedGraph();
         const rawTokens = Array.from(new Set(tokenizeSearch(question)));
         const filteredTokens = rawTokens.filter(t => !QUERY_STOPWORDS.has(t));
         const terms = filteredTokens.length > 0 ? filteredTokens : rawTokens;
@@ -328,9 +377,11 @@ export class GraphTools {
 
         const visited = new Set<string>(seeds.map(s => s.id));
         const frontier: Array<{ id: string; d: number }> = seeds.map(s => ({ id: s.id, d: 0 }));
+        let head = 0;
 
-        while (frontier.length > 0 && visited.size < maxNodes) {
-            const current = mode === 'dfs' ? frontier.pop()! : frontier.shift()!;
+        // BFS는 앞쪽 원소를 매번 이동하지 않고 읽기 위치만 전진시킨다.
+        while ((mode === 'dfs' ? frontier.length > 0 : head < frontier.length) && visited.size < maxNodes) {
+            const current = mode === 'dfs' ? frontier.pop()! : frontier[head++];
             if (current.d >= depth) continue;
             for (const nb of adj.get(current.id) || []) {
                 if (!visited.has(nb)) {
@@ -355,7 +406,7 @@ export class GraphTools {
 
     /** 두 심볼·파일 사이의 최단 연결 경로(의미 연결 우선 BFS, 필요 시 구조적 contains 폴백)를 탐색한다. */
     public findShortestPath(sourceQuery: string, targetQuery: string, maxHops: number = 8) {
-        const exported = buildExportedGraph(this.getGraphData(), this.getWorkspaceRoot());
+        const exported = this.getExportedGraph();
         const resolveNode = (q: string): ExportedNode | undefined => {
             const trimmed = q.trim().replace(/\\/g, '/');
             const lower = trimmed.toLowerCase();
@@ -390,8 +441,8 @@ export class GraphTools {
             const prev = new Map<string, { from: string; link: ExportedLink }>();
             const dist = new Map<string, number>([[srcNode.id, 0]]);
 
-            while (queue.length > 0) {
-                const cur = queue.shift()!;
+            for (let head = 0; head < queue.length; head++) {
+                const cur = queue[head];
                 const d = dist.get(cur)!;
                 if (cur === tgtNode.id) break;
                 if (d >= maxHops) continue;
@@ -441,7 +492,7 @@ export class GraphTools {
     /** 프로젝트의 전체 심볼·관계·커뮤니티·핵심 노드 통계를 요약한다. */
     public getProjectOverview(): any {
         const data = this.getGraphData();
-        const exported = buildExportedGraph(data, this.getWorkspaceRoot());
+        const exported = this.getExportedGraph();
         const stats = {
             totalFiles: new Set(data.files || Object.values(data.symbols).map(s => s.filePath)).size,
             totalSymbols: Object.keys(data.symbols).length,

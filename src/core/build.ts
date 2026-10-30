@@ -14,7 +14,24 @@ export interface WatchOptions {
     onRebuildError?: (error: unknown) => void;
 }
 
-/** 확장과 MCP가 같은 프로젝트의 캐시를 동시에 쓰지 못하게 한다. */
+/** 잠금 파일에 기록된 소유 프로세스가 현재 살아있는지 확인한다. */
+function isLockOwnerAlive(lockPath: string): boolean {
+    try {
+        const raw = fs.readFileSync(lockPath, 'utf8').trim();
+        const pid = Number(raw);
+        if (!raw || !Number.isInteger(pid) || pid <= 0) {
+            // 방금 생성되어 PID를 기록 중인 잠금은 최근 5초 이내면 활성 상태로 본다.
+            return Date.now() - fs.statSync(lockPath).mtimeMs < 5000;
+        }
+        if (pid === process.pid) return true;
+        process.kill(pid, 0);
+        return true;
+    } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'EPERM';
+    }
+}
+
+/** 확장과 MCP가 같은 프로젝트의 캐시를 동시에 쓰지 못하게 하며 죽은 프로세스의 잔류 잠금은 자동 복구한다. */
 export async function withIndexLock<T>(root: string, action: () => Promise<T>): Promise<T> {
     if (!path.isAbsolute(root) || !fs.statSync(root).isDirectory()) {
         throw new Error('색인 대상은 존재하는 프로젝트의 절대 경로여야 합니다.');
@@ -33,17 +50,26 @@ export async function withIndexLock<T>(root: string, action: () => Promise<T>): 
         lock = fs.openSync(lockPath, 'wx');
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-            // shortcut: 비정상 종료 후 잠금은 남는다. 자동 복구가 필요해지면 소유 프로세스 검증을 추가한다.
-            throw new Error(`이미 그래프를 생성 중입니다. 비정상 종료 후라면 잠금을 확인하세요: ${lockPath}`);
+            if (!isLockOwnerAlive(lockPath)) {
+                try { fs.unlinkSync(lockPath); } catch { /* 경쟁 삭제 무시 */ }
+                try {
+                    lock = fs.openSync(lockPath, 'wx');
+                } catch {
+                    throw new Error(`이미 그래프를 생성 중입니다. 비정상 종료 후라면 잠금을 확인하세요: ${lockPath}`);
+                }
+            } else {
+                throw new Error(`이미 그래프를 생성 중입니다. 비정상 종료 후라면 잠금을 확인하세요: ${lockPath}`);
+            }
+        } else {
+            throw error;
         }
-        throw error;
     }
     try {
         fs.writeSync(lock, String(process.pid));
         return await action();
     } finally {
         fs.closeSync(lock);
-        fs.unlinkSync(lockPath);
+        try { fs.unlinkSync(lockPath); } catch { /* 정리 완료 */ }
     }
 }
 
@@ -72,7 +98,10 @@ export async function buildProjectIndex(root: string, extensionPath: string) {
                     }
                     await index.updateFile(file, true);
                     filesIndexed++;
-                    await new Promise(resolve => setImmediate(resolve));
+                    // 확장 호스트 응답성을 유지하면서 파일마다 이벤트 루프를 양보하는 오버헤드를 줄인다.
+                    if (filesIndexed % 25 === 0) {
+                        await new Promise(resolve => setImmediate(resolve));
+                    }
                 }
             }
         }
@@ -119,16 +148,22 @@ export class ProjectWatcher {
         this.debounceMs = options.debounceMs ?? 2500;
     }
 
-    /** 제외 폴더와 비지원 확장자를 걸러내고 실제 색인 대상 소스인지 판별한다. */
+    /** 색인 제외 경로를 걸러내고 소스·폴더·삭제된 경로의 변경을 판별한다. */
     public shouldTrackFile(filePath: string): boolean {
         const resolved = path.resolve(filePath);
         const rel = path.relative(this.realRoot, resolved);
-        if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+        if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return false;
         const parts = rel.split(path.sep);
-        if (parts.some(part => DEFAULT_EXCLUDED_FOLDERS.includes(part) || part.startsWith('.'))) {
+        if (parts.some(part => DEFAULT_EXCLUDED_FOLDERS.includes(part))) {
             return false;
         }
-        return Boolean(CodeParser.getLanguageFromFile(resolved));
+        if (CodeParser.getLanguageFromFile(resolved)) return true;
+        try {
+            return fs.lstatSync(resolved).isDirectory();
+        } catch (error) {
+            // 삭제·이름 변경 뒤에는 확장자로 폴더를 구별할 수 없으므로 재색인한다.
+            return (error as NodeJS.ErrnoException).code === 'ENOENT';
+        }
     }
 
     /** 파일 시스템 감시를 시작한다. */
@@ -175,6 +210,18 @@ export class ProjectWatcher {
                     const result = await buildProjectIndex(this.realRoot, this.extensionPath);
                     this.options.onRebuildDone?.(result);
                 } catch (error) {
+                    // 수동 빌드나 외부 MCP가 잠금을 보유 중이면 오류 대신 다음 디바운스 주기로 재예약한다.
+                    if (this.active && error instanceof Error && error.message.includes('이미 그래프를 생성 중입니다')) {
+                        for (const file of batch) this.changedFiles.add(file);
+                        if (!this.timer) {
+                            this.timer = setTimeout(() => {
+                                this.timer = null;
+                                this.currentRun = this.runRebuildLoop();
+                            }, this.debounceMs);
+                        }
+                        this.options.onRebuildError?.(error);
+                        break;
+                    }
                     this.options.onRebuildError?.(error);
                 }
             } while (this.pendingRebuild && this.active);
@@ -182,6 +229,16 @@ export class ProjectWatcher {
             this.building = false;
             this.currentRun = null;
         }
+    }
+
+    /** 수동 빌드나 캐시 초기화 전에 예약된 디바운스 갱신을 취소한다. */
+    public cancelPending(): void {
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
+        }
+        this.changedFiles.clear();
+        this.pendingRebuild = false;
     }
 
     /** 예약된 디바운스 타이머와 실행 중인 그래프 갱신이 모두 끝날 때까지 대기한다. */
@@ -208,15 +265,10 @@ export class ProjectWatcher {
     /** 타이머와 파일 감시 자원을 정리하고 감시를 중지한다. */
     public stop(): void {
         this.active = false;
-        if (this.timer) {
-            clearTimeout(this.timer);
-            this.timer = null;
-        }
+        this.cancelPending();
         if (this.fsWatcher) {
             this.fsWatcher.close();
             this.fsWatcher = null;
         }
-        this.changedFiles.clear();
-        this.pendingRebuild = false;
     }
 }

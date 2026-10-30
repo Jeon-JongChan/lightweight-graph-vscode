@@ -263,11 +263,11 @@ npm run package
 ## Marketplace 게시
 
 1. [Marketplace 게시자 관리](https://marketplace.visualstudio.com/manage)에서 Microsoft 계정으로 로그인하고 게시자를 만듭니다. 현재 `package.json`의 게시자 ID는 `lightweight`입니다. 다른 ID로 만들면 `publisher` 값을 변경한 후 패키지를 다시 생성하세요.
-2. `npm run compile`과 `npm run lint`를 실행한 뒤 `npm run package`로 `lightweight-graph-mcp-1.2.0.vsix`를 생성합니다. 시스템 Node.js가 없다면 저장소의 `.tools\\.build\\npm.cmd`를 `npm` 대신 사용할 수 있습니다.
+2. `npm run compile`과 `npm run lint`를 실행한 뒤 `npm run package`로 `lightweight-graph-mcp-1.2.1.vsix`를 생성합니다. 시스템 Node.js가 없다면 저장소의 `.tools\\.build\\npm.cmd`를 `npm` 대신 사용할 수 있습니다.
 3. VS Code의 **Extensions: Install from VSIX…**로 설치하고 그래프 생성과 MCP 서버 연결을 확인합니다.
 4. 게시자 관리 화면에서 **New extension → Visual Studio Code**를 선택하고 VSIX를 업로드합니다. 이후 업데이트는 버전을 올려 새 VSIX를 업로드합니다.
 
-수동 업로드에는 CLI용 PAT가 필요하지 않습니다. 자세한 절차는 [VS Code 공식 게시 문서](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)를 참고하세요. VS Code 내 MCP는 내장 런타임을 사용하지만, 외부 MCP 클라이언트 연결에는 Node.js가 필요하며 전역 연결 도구는 Windows PowerShell을 사용합니다.
+수동 업로드에는 CLI용 PAT가 필요하지 않습니다. 자세한 절차는 [VS Code 공식 게시 문서](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)를 참고하세요. VS Code의 전역 연결 메뉴는 내장 런타임을 사용하므로 별도 Node.js가 필요하지 않습니다. Windows PowerShell을 통해 기존 MCP 항목을 현재 설치 경로로 갱신하고 원래 설정을 `.bak` 파일로 백업합니다. 확장을 업데이트하거나 설치 위치를 바꾼 뒤에는 전역 연결 메뉴를 다시 실행하고 연결된 클라이언트의 MCP 서버를 다시 시작하세요. 저장소에서 설정 명령을 직접 실행할 때는 Node.js가 필요합니다.
 
 ## License
 

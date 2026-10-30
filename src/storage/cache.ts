@@ -36,7 +36,8 @@ export class GraphCache {
     public async save(data: GraphData): Promise<void> {
         fs.mkdirSync(path.dirname(this.cachePath), { recursive: true });
         const temporaryPath = `${this.cachePath}.tmp`;
-        fs.writeFileSync(temporaryPath, JSON.stringify(data, null, 2), 'utf-8');
+        // 기계가 읽는 캐시이므로 들여쓰기를 생략해 대형 그래프의 직렬화 시간과 파일 크기를 줄인다.
+        fs.writeFileSync(temporaryPath, JSON.stringify(data), 'utf-8');
         fs.renameSync(temporaryPath, this.cachePath);
     }
 

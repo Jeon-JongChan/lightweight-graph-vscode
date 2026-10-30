@@ -16,6 +16,7 @@ interface ResolutionContext {
     relation: Relation;
     data: GraphData;
     matches: SymbolInfo[];
+    matchesSet: Set<SymbolInfo>;
     sourceFile: string;
     importedFiles: Set<string>;
     receiverTypes: SymbolInfo[];
@@ -73,20 +74,20 @@ function resolveThis(context: ResolutionContext): ResolutionMatch | null {
 
 /** 안쪽 함수부터 모듈까지 검색하고 무관한 클래스 멤버는 제외한다. */
 function resolveLexical(context: ResolutionContext): ResolutionMatch | null {
-    const { relation, data, sourceFile } = context;
+    const { relation, data, sourceFile, matchesSet } = context;
     if (relation.receiver) return null;
     const name = relation.targetId.slice('unknown::'.length);
     let scope = relation.sourceId;
     while (true) {
         const target = scopedTarget(context,`${scope}::${name}`);
         if (target && !(relation.kind === 'call' && !context.implicitThis && ['class', 'interface'].includes(data.symbols[scope]?.kind)) &&
-            context.matches.includes(target)) {
+            matchesSet.has(target)) {
             return { target, certainty: 'RESOLVED', score: 1 };
         }
         if (relation.kind === 'call' && context.implicitThis && ['class', 'interface'].includes(data.symbols[scope]?.kind)) {
             for (const base of context.ancestors(scope)) {
                 const inherited = scopedTarget(context,`${base}::${name}`);
-                if (inherited && context.matches.includes(inherited)) return { target: inherited, certainty: 'RESOLVED', score: 0.95 };
+                if (inherited && matchesSet.has(inherited)) return { target: inherited, certainty: 'RESOLVED', score: 0.95 };
             }
         }
         if (scope === relation.lexicalBinding) return null;
@@ -98,7 +99,7 @@ function resolveLexical(context: ResolutionContext): ResolutionMatch | null {
 
 /** 수신자 타입에 해당하는 클래스와 부모 클래스의 멤버를 찾는다. */
 function resolveReceiver(context: ResolutionContext): ResolutionMatch | null {
-    const { relation, matches, sourceFile, ancestors, importedFiles } = context;
+    const { relation, matchesSet, sourceFile, ancestors, importedFiles } = context;
     if (!relation.receiver || ['this', 'member'].includes(relation.receiver)) return null;
     const name = relation.targetId.slice('unknown::'.length);
     let owners = context.receiverTypes.filter(symbol => ['class', 'interface'].includes(symbol.kind));
@@ -109,7 +110,7 @@ function resolveReceiver(context: ResolutionContext): ResolutionMatch | null {
     if (!owner) return null;
     for (const ownerId of [owner.id, ...ancestors(owner.id)]) {
         const target = scopedTarget(context,`${ownerId}::${name}`);
-        if (target && matches.includes(target)) return { target, certainty: 'RESOLVED', score: 0.95 };
+        if (target && matchesSet.has(target)) return { target, certainty: 'RESOLVED', score: 0.95 };
     }
     return null;
 }
@@ -148,6 +149,7 @@ export class RelationResolver {
     private importedByFile = new Map<string, Set<string>>();
     private bindingsByScope = new Map<string, Map<string, { filePath: string; name: string }>>();
     private supertypes = new Map<string, Set<string>>();
+    private ancestorCache = new Map<string, string[]>();
     private exportsByFile = new Map<string, Map<string, string[]>>();
     private reexportsByFile = new Map<string, Relation[]>();
 
@@ -216,15 +218,20 @@ export class RelationResolver {
         }
     }
 
-    /** 이미 확인한 상속 관계를 계층에 등록한다. */
+    /** 이미 확인한 상속 관계를 계층에 등록하고 조상 캐시를 비운다. */
     private recordSupertype(relation: Relation): void {
         const targets = this.supertypes.get(relation.sourceId) || new Set<string>();
-        targets.add(relation.targetId);
-        this.supertypes.set(relation.sourceId, targets);
+        if (!targets.has(relation.targetId)) {
+            targets.add(relation.targetId);
+            this.supertypes.set(relation.sourceId, targets);
+            this.ancestorCache.clear();
+        }
     }
 
-    /** 순환 상속에 종료가 보장되는 너비 우선 탐색을 수행한다. */
+    /** 순환 상속에 종료가 보장되는 너비 우선 탐색을 수행하며 결과를 캐시한다. */
     private ancestors = (classId: string): string[] => {
+        const cached = this.ancestorCache.get(classId);
+        if (cached) return cached;
         const queue = [classId];
         const visited = new Set(queue);
         for (let head = 0; head < queue.length; head++) {
@@ -234,14 +241,19 @@ export class RelationResolver {
                 queue.push(base);
             }
         }
-        return queue.slice(1);
+        const result = queue.slice(1);
+        this.ancestorCache.set(classId, result);
+        return result;
     };
 
     /** 상속·참조를 먼저 해석하여 호출 전략이 완성된 계층을 사용하게 한다. */
     public resolve(): void {
         const relations = Object.values(this.data.relations);
-        const ordered = [...relations.filter(rel => ['inherit', 'implement', 'reference'].includes(rel.kind)),
-            ...relations.filter(rel => rel.kind === 'call')];
+        const ordered = [
+            ...relations.filter(rel => ['inherit', 'implement'].includes(rel.kind)),
+            ...relations.filter(rel => rel.kind === 'reference'),
+            ...relations.filter(rel => rel.kind === 'call')
+        ];
         for (const relation of ordered) {
             if (!relation.targetId.startsWith('unknown::')) continue;
             const sourceFile = relation.sourceId.split('::')[0];
@@ -250,6 +262,7 @@ export class RelationResolver {
             const key = `${family}::${canonicalName(sourceLanguage,relation.targetId.slice('unknown::'.length))}`;
             const matches = (this.byName.get(key) || []).filter(symbol => relation.kind !== 'call' ||
                 ['class', 'function', 'method'].includes(symbol.kind));
+            const matchesSet = new Set(matches);
             const namespace = relation.receiver?.startsWith('namespace::') ? relation.receiver.slice('namespace::'.length) : null;
             let binding = !relation.lexicalBinding && (namespace || !relation.receiver)
                 ? this.findBinding(relation.sourceId, namespace || relation.targetId.slice('unknown::'.length)) : null;
@@ -260,7 +273,7 @@ export class RelationResolver {
             const receiverTypes = relation.receiver ? (this.byName.get(`${family}::${canonicalName(sourceLanguage,typeBinding?.name || relation.receiver)}`) || [])
                 .filter(symbol => !typeBinding || symbol.filePath === typeBinding.filePath) : [];
             const context: ResolutionContext = {
-                relation, data: this.data, matches, sourceFile, binding, bindingCandidates, language:sourceLanguage,
+                relation, data: this.data, matches, matchesSet, sourceFile, binding, bindingCandidates, language:sourceLanguage,
                 importedFiles: this.importedByFile.get(sourceFile) || new Set<string>(), ancestors: this.ancestors,
                 receiverTypes,
                 // Java·C#·C++ 계열의 멤버 본문은 수신자 없이 같은 클래스의 메서드를 호출할 수 있다.

@@ -15,11 +15,12 @@ export class GraphMcpServer {
     private activeRoot: string;
     private indexBuilt = false;
     private graphData: GraphData = { version: '1.0', symbols: {}, relations: {} };
+    private loadedCacheMeta: { root: string; filePath: string; mtimeMs: number; size: number } | null = null;
     private tools: GraphTools;
 
     /** 기본 작업 영역 루트를 설정하고 MCP 도구를 등록한다. */
     constructor(private readonly workspaceRoot: string) {
-        this.activeRoot = path.resolve(workspaceRoot);
+        this.activeRoot = fs.existsSync(workspaceRoot) ? fs.realpathSync(workspaceRoot) : path.resolve(workspaceRoot);
         this.server = new McpServer({
             name: "Lightweight Graph MCP",
             version: "1.0.1"
@@ -28,23 +29,47 @@ export class GraphMcpServer {
         this.registerTools();
     }
 
-    /** 요청별 project_path 또는 기본 작업 영역 루트를 검증하여 반환한다. */
+    /** 요청별 project_path 또는 기본 작업 영역 루트를 검증하여 실제 경로로 반환한다. */
     private resolveTargetRoot(projectPath?: string): string {
         const target = projectPath ? path.resolve(projectPath) : this.workspaceRoot;
         if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
             throw new Error(`유효한 프로젝트 디렉터리 경로가 아닙니다: ${target}`);
         }
-        return target;
+        return fs.realpathSync(target);
     }
 
-    /** 대상 프로젝트의 캐시를 최신 상태로 읽어 메모리에 반영한다. */
+    /** 대상 프로젝트의 캐시가 변경되었을 때만 다시 읽어 메모리에 반영한다. */
     public async reloadIndexIfNeeded(projectPath?: string): Promise<{ root: string; cache: GraphCache }> {
         const root = this.resolveTargetRoot(projectPath);
         const cache = new GraphCache(root);
-        const loaded = await cache.load();
+        const primaryPath = cache.getCachePath();
+        const legacyPath = path.join(root, '.mcp', 'graph-cache.json');
+        const activeFile = fs.existsSync(primaryPath) ? primaryPath : (fs.existsSync(legacyPath) ? legacyPath : '');
+
+        if (activeFile) {
+            const stat = fs.statSync(activeFile);
+            if (
+                this.loadedCacheMeta &&
+                this.loadedCacheMeta.root === root &&
+                this.loadedCacheMeta.filePath === activeFile &&
+                this.loadedCacheMeta.mtimeMs === stat.mtimeMs &&
+                this.loadedCacheMeta.size === stat.size
+            ) {
+                this.activeRoot = root;
+                return { root, cache };
+            }
+            const loaded = await cache.load();
+            this.activeRoot = root;
+            this.indexBuilt = loaded !== null;
+            this.graphData = loaded ?? { version: '1.0', symbols: {}, relations: {} };
+            this.loadedCacheMeta = loaded ? { root, filePath: activeFile, mtimeMs: stat.mtimeMs, size: stat.size } : null;
+            return { root, cache };
+        }
+
         this.activeRoot = root;
-        this.indexBuilt = loaded !== null;
-        this.graphData = loaded ?? { version: '1.0', symbols: {}, relations: {} };
+        this.indexBuilt = false;
+        this.graphData = { version: '1.0', symbols: {}, relations: {} };
+        this.loadedCacheMeta = null;
         return { root, cache };
     }
 
@@ -70,7 +95,7 @@ export class GraphMcpServer {
             "이름이나 식별자 패턴으로 함수·클래스·인터페이스 심볼을 검색합니다.",
             {
                 query: z.string().describe("검색할 심볼 이름 또는 부분 문자열"),
-                max_nodes: z.number().optional().describe("최대 반환 개수 (기본 30)"),
+                max_nodes: z.number().int().min(1).optional().describe("최대 반환 개수 (기본 30)"),
                 project_path: projectPathParam
             },
             async ({ query, max_nodes, project_path }) => {
@@ -136,7 +161,7 @@ export class GraphMcpServer {
             "특정 심볼을 수정할 때 직·간접적으로 영향받는 상위 호출·상속 심볼 범위를 분석합니다.",
             {
                 target: z.string().describe("대상 심볼 이름"),
-                max_depth: z.number().optional().describe("최대 추적 홉 깊이 (기본 3)"),
+                max_depth: z.number().int().min(1).optional().describe("최대 추적 홉 깊이 (기본 3)"),
                 project_path: projectPathParam
             },
             async ({ target, max_depth, project_path }) => {
@@ -151,8 +176,8 @@ export class GraphMcpServer {
             {
                 question: z.string().describe("검색할 키워드, 심볼 이름 또는 질문"),
                 mode: z.enum(["bfs", "dfs"]).optional().describe("탐색 방식: bfs(기본) 또는 dfs"),
-                depth: z.number().optional().describe("탐색 깊이 (기본 3)"),
-                max_nodes: z.number().optional().describe("최대 반환 노드 수 (기본 30)"),
+                depth: z.number().int().min(1).optional().describe("탐색 깊이 (기본 3)"),
+                max_nodes: z.number().int().min(1).optional().describe("최대 반환 노드 수 (기본 30)"),
                 project_path: projectPathParam
             },
             async ({ question, mode, depth, max_nodes, project_path }) => {
@@ -167,7 +192,7 @@ export class GraphMcpServer {
             {
                 source: z.string().describe("출발 심볼 또는 파일 이름"),
                 target: z.string().describe("도착 심볼 또는 파일 이름"),
-                max_hops: z.number().optional().describe("최대 허용 홉 수 (기본 8)"),
+                max_hops: z.number().int().min(1).optional().describe("최대 허용 홉 수 (기본 8)"),
                 project_path: projectPathParam
             },
             async ({ source, target, max_hops, project_path }) => {
@@ -180,7 +205,7 @@ export class GraphMcpServer {
         this.server.tool("get_god_nodes",
             "프로젝트에서 가장 연결이 집중된 핵심 추상화 심볼(God Nodes) 상위 목록을 조회합니다.",
             {
-                top_n: z.number().optional().describe("반환할 상위 심볼 수 (기본 10)"),
+                top_n: z.number().int().min(1).optional().describe("반환할 상위 심볼 수 (기본 10)"),
                 project_path: projectPathParam
             },
             async ({ top_n, project_path }) => {
@@ -193,7 +218,7 @@ export class GraphMcpServer {
         this.server.tool("get_communities",
             "코드 그래프의 모듈 커뮤니티 목록과 응집도(Cohesion), 또는 특정 커뮤니티 상세 노드를 조회합니다.",
             {
-                community_id: z.number().optional().describe("특정 커뮤니티 번호 (생략 시 전체 요약 반환)"),
+                community_id: z.number().int().min(0).optional().describe("특정 커뮤니티 번호 (생략 시 전체 요약 반환)"),
                 project_path: projectPathParam
             },
             async ({ community_id, project_path }) => {
@@ -253,7 +278,7 @@ export class GraphMcpServer {
             }
             case 'watch': {
                 const root = this.resolveTargetRoot(args[0]);
-                const debounceMs = args[1] ? Math.max(200, Number(args[1]) * 1000) : 2500;
+                const debounceMs = Math.max(200, Number(args[1]) * 1000 || 2500);
                 const watcher = new ProjectWatcher(root, path.resolve(__dirname, '../..'), {
                     debounceMs,
                     onRebuildStart: files => console.error(`[graph-mcp watch] 변경 감지 (${files.length}개 파일) -> 그래프 갱신 시작...`),

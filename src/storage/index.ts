@@ -24,6 +24,7 @@ export class GraphIndex {
     private parseErrorFiles = new Set<string>();
     private workspaceRoot: string;
     private indexedContents = new Map<string, string>();
+    private trackedFiles = new Set<string>();
 
     /** 프로젝트 캐시와 파서의 자산 경로를 설정한다. */
     constructor(workspaceRoot: string, extensionPath?: string) {
@@ -41,11 +42,13 @@ export class GraphIndex {
             this.data = loaded;
             this.data.files ||= [...new Set([...Object.values(loaded.symbols).map(symbol => symbol.filePath),
                 ...Object.values(loaded.relations).map(relation => relation.sourceId.split('::')[0])])];
+            this.trackedFiles = new Set(this.data.files);
             if (!loaded.extractedRelations) {
                 // 이전 캐시의 해석 결과를 원시 사실로 오인하지 않고 프로젝트 내부 소스에서 복원한다.
                 const files = new Set([...Object.values(loaded.symbols).map(symbol => symbol.filePath),
                     ...Object.values(loaded.relations).map(relation => relation.sourceId.split('::')[0])]);
                 this.data = { version: '1.0', files: [], symbols: {}, relations: {}, extractedRelations: {} };
+                this.trackedFiles.clear();
                 const realRoot = fs.realpathSync(this.workspaceRoot);
                 for (const file of files) {
                     const relative = path.relative(realRoot, path.resolve(file));
@@ -75,44 +78,37 @@ export class GraphIndex {
                 }
                 return;
             }
-            const cached = rawAstCache.get(filePath);
-            if (cached && cached.content === content) {
-                this.removeFileEntries(filePath);
-                this.data.files!.push(filePath);
-                if (cached.hasError) this.parseErrorFiles.add(filePath);
-                for (const sym of cached.symbols) {
-                    this.data.symbols[sym.id] = { ...sym };
+            let entry = rawAstCache.get(filePath);
+            if (entry && entry.content === content) {
+                // LRU 순서 유지를 위해 히트한 항목을 최신 위치로 갱신한다.
+                rawAstCache.delete(filePath);
+                rawAstCache.set(filePath, entry);
+            } else {
+                await this.parser.initialize(this.extensionPath, [language]);
+                const { symbols, relations, hasError } = analyzeFile(language, content, filePath, this.parser);
+                if (rawAstCache.size >= 5000 && !rawAstCache.has(filePath)) {
+                    const oldestKey = rawAstCache.keys().next().value;
+                    if (oldestKey !== undefined) rawAstCache.delete(oldestKey);
                 }
-                for (const rel of cached.relations) {
-                    this.data.relations[rel.id] = { ...rel };
-                    this.data.extractedRelations![rel.id] = { ...rel };
-                }
-                this.indexedContents.set(filePath, content);
-                if (!skipSave) {
-                    this.resolveRelations();
-                    await this.cache.save(this.data);
-                }
-                return;
+                entry = {
+                    content,
+                    hasError,
+                    symbols: symbols.map(s => ({ ...s })),
+                    relations: relations.map(r => ({ ...r }))
+                };
+                rawAstCache.set(filePath, entry);
             }
 
-            await this.parser.initialize(this.extensionPath, [language]);
-            const { symbols, relations, hasError } = analyzeFile(language, content, filePath, this.parser);
-            if (rawAstCache.size > 2000) rawAstCache.clear();
-            rawAstCache.set(filePath, {
-                content,
-                hasError,
-                symbols: symbols.map(s => ({ ...s })),
-                relations: relations.map(r => ({ ...r }))
-            });
             this.removeFileEntries(filePath);
             this.data.files!.push(filePath);
-            if (hasError) this.parseErrorFiles.add(filePath);
+            this.trackedFiles.add(filePath);
+            if (entry.hasError) this.parseErrorFiles.add(filePath);
 
             // 키가 같은 중복 선언은 하나로 합친다.
-            for (const sym of symbols) {
-                this.data.symbols[sym.id] = sym;
+            for (const sym of entry.symbols) {
+                this.data.symbols[sym.id] = { ...sym };
             }
-            for (const rel of relations) {
+            for (const rel of entry.relations) {
                 this.data.relations[rel.id] = { ...rel };
                 this.data.extractedRelations![rel.id] = { ...rel };
             }
@@ -143,7 +139,8 @@ export class GraphIndex {
     private removeFileEntries(filePath: string) {
         this.indexedContents.delete(filePath);
         // 새 스냅샷에 처음 추가되는 파일은 기존 전체 그래프를 순회할 필요가 없다.
-        if (!this.data.files?.includes(filePath)) return;
+        if (!this.trackedFiles.has(filePath)) return;
+        this.trackedFiles.delete(filePath);
         this.data.files = this.data.files?.filter(file => file !== filePath) || [];
         this.parseErrorFiles.delete(filePath);
         for (const id in this.data.symbols) {
@@ -194,6 +191,7 @@ export class GraphIndex {
         this.data = { version: '1.0', files: [], symbols: {}, relations: {}, extractedRelations: {} };
         this.parseErrorFiles.clear();
         this.indexedContents.clear();
+        this.trackedFiles.clear();
         await this.cache.clear();
     }
 
