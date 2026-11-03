@@ -263,7 +263,7 @@ npm run package
 ## Marketplace 게시
 
 1. [Marketplace 게시자 관리](https://marketplace.visualstudio.com/manage)에서 Microsoft 계정으로 로그인하고 게시자를 만듭니다. 현재 `package.json`의 게시자 ID는 `lightweight`입니다. 다른 ID로 만들면 `publisher` 값을 변경한 후 패키지를 다시 생성하세요.
-2. `npm run compile`과 `npm run lint`를 실행한 뒤 `npm run package`로 `lightweight-graph-mcp-1.2.1.vsix`를 생성합니다. 시스템 Node.js가 없다면 저장소의 `.tools\\.build\\npm.cmd`를 `npm` 대신 사용할 수 있습니다.
+2. `npm run compile`과 `npm run lint`를 실행한 뒤 `npm run package`로 `lightweight-graph-mcp-1.2.3.vsix`를 생성합니다. 시스템 Node.js가 없다면 저장소의 `.tools\\.build\\npm.cmd`를 `npm` 대신 사용할 수 있습니다.
 3. VS Code의 **Extensions: Install from VSIX…**로 설치하고 그래프 생성과 MCP 서버 연결을 확인합니다.
 4. 게시자 관리 화면에서 **New extension → Visual Studio Code**를 선택하고 VSIX를 업로드합니다. 이후 업데이트는 버전을 올려 새 VSIX를 업로드합니다.
 
