@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { execFile } from 'child_process';
+import { manageMcp } from './ide';
 import { GraphMcpServerProvider } from './mcp-provider';
 import { WorkspaceManager } from './workspace';
 
@@ -24,14 +25,7 @@ export function activate(context: vscode.ExtensionContext): void {
             vscode.window.showInformationMessage(`Graph MCP 색인 상태: ${statusBar.text}`)),
         vscode.commands.registerCommand('graph-mcp.openLogs', () =>
             vscode.commands.executeCommand('workbench.action.showLogs')),
-        vscode.commands.registerCommand('graph-mcp.manageMcp', async () => {
-            try {
-                // shortcut: 설치 버전에서 확인한 내부 명령이다. 제거되면 MCP 관리 진입 경로를 갱신한다.
-                await vscode.commands.executeCommand('workbench.mcp.listServer');
-            } catch (error) {
-                vscode.window.showErrorMessage(`MCP 관리 화면을 열지 못했습니다. 확장 보기의 MCP 서버를 확인하세요. ${error}`);
-            }
-        }),
+        vscode.commands.registerCommand('graph-mcp.manageMcp', () => manageMcp(context)),
         vscode.commands.registerCommand('graph-mcp.setupAgents', async () => {
             try {
                 const scriptPath = path.join(context.extensionPath, 'tools', 'config-graph-mcp.ps1');

@@ -1,0 +1,7 @@
+{
+  "upstream": "Graphify-Labs/graphify",
+  "checkedVersion": "0.9.101",
+  "checkedAt": "2026-11-03",
+  "note": "동일 작업 시 GitHub releases/latest 의 tag_name 이 checkedVersion 과 같으면 병합 작업을 건너뛴다. 병합 내역은 .docs/ 보고서 참고."
+}
+

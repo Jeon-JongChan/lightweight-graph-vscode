@@ -440,6 +440,8 @@ export class GraphTools {
             const queue: string[] = [srcNode.id];
             const prev = new Map<string, { from: string; link: ExportedLink }>();
             const dist = new Map<string, number>([[srcNode.id, 0]]);
+            // Graphify 0.9.99: 길이가 같은 경로 중 가장 약한 간선의 신뢰도가 높은(보수적) 경로를 고른다.
+            const bott = new Map<string, number>([[srcNode.id, Infinity]]);
 
             for (let head = 0; head < queue.length; head++) {
                 const cur = queue[head];
@@ -448,10 +450,15 @@ export class GraphTools {
                 if (d >= maxHops) continue;
 
                 for (const edge of adj.get(cur) || []) {
+                    const b = Math.min(bott.get(cur)!, edge.link.confidence_score);
                     if (!dist.has(edge.next)) {
                         dist.set(edge.next, d + 1);
+                        bott.set(edge.next, b);
                         prev.set(edge.next, { from: cur, link: edge.link });
                         queue.push(edge.next);
+                    } else if (dist.get(edge.next) === d + 1 && b > bott.get(edge.next)!) {
+                        bott.set(edge.next, b);
+                        prev.set(edge.next, { from: cur, link: edge.link });
                     }
                 }
             }
@@ -485,7 +492,9 @@ export class GraphTools {
             source: srcNode.id,
             target: tgtNode.id,
             pathNodes,
-            pathLinks
+            pathLinks,
+            // Graphify 0.9.98: 경로 전체 신뢰도는 가장 약한 구간 기준이다.
+            pathConfidence: pathLinks.reduce((m, l) => Math.min(m, l.confidence_score), 1)
         };
     }
 
